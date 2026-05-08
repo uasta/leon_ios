@@ -2,6 +2,8 @@ import SwiftUI
 
 struct IngredientsListView: View {
     @EnvironmentObject private var store: IngredientStore
+    @EnvironmentObject private var recommendationStore: RecommendationStore
+    @EnvironmentObject private var navigationStore: AppNavigationStore
     @Environment(\.editMode) private var editMode
 
     @State private var query: String = ""
@@ -64,7 +66,7 @@ struct IngredientsListView: View {
                     ContentUnavailableView(
                         "还没有食材",
                         systemImage: "carrot",
-                        description: Text("先添加几个常用食材，临期提醒会更有用。")
+                        description: Text("先添加几个常用食材，后面就能直接带着食材去推荐。")
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -115,6 +117,20 @@ struct IngredientsListView: View {
                             selectedIDs.forEach { store.postponeExpiry($0, days: 1) }
                         } label: {
                             Label("延期1天", systemImage: "calendar.badge.plus")
+                        }
+
+                        Spacer()
+
+                        Button {
+                            let selectedNames = store.items
+                                .filter { selectedIDs.contains($0.id) }
+                                .map(\.name)
+                            recommendationStore.setSelectedIngredientNames(selectedNames)
+                            navigationStore.switchToRecommend()
+                            editMode?.wrappedValue = .inactive
+                            selectedIDs.removeAll()
+                        } label: {
+                            Label("去推荐", systemImage: "arrow.right.circle")
                         }
 
                         Spacer()
@@ -409,4 +425,3 @@ private struct IngredientFilterSheet: View {
         )
     }
 }
-

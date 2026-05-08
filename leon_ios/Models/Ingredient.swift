@@ -1,7 +1,7 @@
 import Foundation
 
-struct Ingredient: Identifiable, Hashable {
-    enum Location: String, CaseIterable, Identifiable {
+struct Ingredient: Identifiable, Hashable, Codable {
+    enum Location: String, CaseIterable, Identifiable, Codable {
         case fridgeChill = "冰箱·冷藏"
         case fridgeFreeze = "冰箱·冷冻"
         case pantry = "常温·储物柜"
@@ -54,6 +54,13 @@ struct Ingredient: Identifiable, Hashable {
     }
 }
 
+struct IngredientSyncDraft: Hashable, Codable {
+    var name: String
+    var quantity: Double?
+    var unit: String
+    var note: String
+}
+
 extension Ingredient {
     enum Freshness: Comparable {
         case expired
@@ -81,5 +88,13 @@ extension Ingredient {
         let numberText = isInt ? String(Int(quantity)) : String(format: "%.1f", quantity)
         return "\(numberText)\(unit)"
     }
-}
 
+    var syncDraft: IngredientSyncDraft {
+        IngredientSyncDraft(
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            quantity: quantity,
+            unit: unit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "份" : unit.trimmingCharacters(in: .whitespacesAndNewlines),
+            note: note.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+}

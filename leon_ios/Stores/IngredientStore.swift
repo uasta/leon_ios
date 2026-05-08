@@ -5,32 +5,66 @@ import Combine
 final class IngredientStore: ObservableObject {
     @Published private(set) var items: [Ingredient]
 
-    init(items: [Ingredient] = IngredientStore.sampleItems) {
-        self.items = items
+    private let storageKey = "ingredient.store.items"
+
+    init(items: [Ingredient]? = nil) {
+        if let items {
+            self.items = items
+        } else if
+            let data = UserDefaults.standard.data(forKey: storageKey),
+            let decoded = try? JSONDecoder().decode([Ingredient].self, from: data)
+        {
+            self.items = decoded
+        } else {
+            self.items = IngredientStore.sampleItems
+            persist()
+        }
     }
 
     func add(_ ingredient: Ingredient) {
         items.insert(ingredient, at: 0)
+        persist()
     }
 
     func update(_ ingredient: Ingredient) {
         guard let idx = items.firstIndex(where: { $0.id == ingredient.id }) else { return }
         items[idx] = ingredient
+        persist()
     }
 
     func archive(_ ingredientID: Ingredient.ID) {
         guard let idx = items.firstIndex(where: { $0.id == ingredientID }) else { return }
         items[idx].isArchived = true
+        persist()
     }
 
     func delete(_ ingredientID: Ingredient.ID) {
         items.removeAll { $0.id == ingredientID }
+        persist()
     }
 
     func postponeExpiry(_ ingredientID: Ingredient.ID, days: Int) {
         guard let idx = items.firstIndex(where: { $0.id == ingredientID }) else { return }
         guard let expiry = items[idx].expiryDate else { return }
         items[idx].expiryDate = Calendar.current.date(byAdding: .day, value: days, to: expiry)
+        persist()
+    }
+
+    func replaceAll(_ ingredients: [Ingredient]) {
+        items = ingredients
+        persist()
+    }
+
+    func activeSyncDrafts() -> [IngredientSyncDraft] {
+        items
+            .filter { !$0.isArchived }
+            .map(\.syncDraft)
+            .filter { !$0.name.isEmpty }
+    }
+
+    private func persist() {
+        guard let data = try? JSONEncoder().encode(items) else { return }
+        UserDefaults.standard.set(data, forKey: storageKey)
     }
 }
 
@@ -88,4 +122,3 @@ extension IngredientStore {
         ]
     }
 }
-
