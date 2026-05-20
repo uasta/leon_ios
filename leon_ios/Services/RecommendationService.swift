@@ -42,6 +42,14 @@ actor RecommendationService {
         return try await client.send(request, as: SearchRecipesResponse.self)
     }
 
+    func fetchSearchSuggestions(query: String) async throws -> APIEnvelope<[String]> {
+        let request = APIRequest(
+            path: "api/v1/recipes/suggest",
+            queryItems: [URLQueryItem(name: "q", value: query)]
+        )
+        return try await client.send(request, as: [String].self)
+    }
+
     func fetchRecipeDetail(id: Int) async throws -> APIEnvelope<RecipeDetail> {
         try await client.send(APIRequest(path: "api/v1/recipes/\(id)"), as: RecipeDetail.self)
     }

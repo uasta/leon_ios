@@ -13,7 +13,7 @@ struct RecipeDetailView: View {
     @State private var isLoading: Bool = false
     @State private var isSubmittingAction: Bool = false
     @State private var errorMessage: String?
-    @State private var showActionHint: Bool = false
+    @State private var showAuthSheet: Bool = false
 
     private let service = RecommendationService(client: APIClient())
     private let profileService = ProfileService(client: APIClient())
@@ -111,10 +111,8 @@ struct RecipeDetailView: View {
         .task {
             await loadDetail()
         }
-        .alert("功能继续联调中", isPresented: $showActionHint) {
-            Button("知道了", role: .cancel) {}
-        } message: {
-            Text(sessionStore.isAuthenticated ? "当前请求正在处理中，如果状态没有变化，可以稍后再试一次。" : "先登录账号，再把点赞、收藏和历史同步到“我的”。")
+        .sheet(isPresented: $showAuthSheet) {
+            AuthSheetView(initialMode: .login)
         }
     }
 
@@ -164,7 +162,7 @@ struct RecipeDetailView: View {
 
     private func toggleLike() async {
         guard sessionStore.isAuthenticated else {
-            showActionHint = true
+            showAuthSheet = true
             return
         }
 
@@ -188,7 +186,7 @@ struct RecipeDetailView: View {
 
     private func toggleFavorite() async {
         guard sessionStore.isAuthenticated else {
-            showActionHint = true
+            showAuthSheet = true
             return
         }
 

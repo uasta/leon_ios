@@ -8,15 +8,22 @@ final class RecommendationStore: ObservableObject {
         var favorited: Bool?
     }
 
+    private static let searchHistoryKey = "recommend.searchHistory"
+    private static let maxSearchHistoryCount = 8
+
     @Published var query: String = ""
     @Published private(set) var feed: [RecipeSummary]
     @Published private(set) var searchResults: [RecipeSummary]
+    @Published private(set) var searchSuggestions: [String]
+    @Published private(set) var searchHistory: [String]
     @Published private(set) var hotSearches: [String]
     @Published private(set) var selectedIngredientNames: [String]
     @Published private(set) var isLoading: Bool
     @Published private(set) var isSearching: Bool
+    @Published private(set) var isFetchingSuggestions: Bool
     @Published private(set) var errorMessage: String?
     @Published private(set) var searchErrorMessage: String?
+    @Published private(set) var lastSubmittedQuery: String?
 
     private let service: RecommendationService
     private var rawFeed: [RecipeSummary]
@@ -24,11 +31,13 @@ final class RecommendationStore: ObservableObject {
     private var hasLoadedFeed = false
     private var hasLoadedHotSearches = false
     private var interactionOverrides: [Int: InteractionState] = [:]
+    private var latestSuggestionQuery: String?
 
     init(
         service: RecommendationService = RecommendationService(client: APIClient()),
         feed: [RecipeSummary] = RecommendationStore.sampleFeed,
         searchResults: [RecipeSummary] = [],
+        searchSuggestions: [String] = [],
         hotSearches: [String] = RecommendationStore.sampleHotSearches,
         selectedIngredientNames: [String] = [],
         isLoading: Bool = false,
@@ -40,12 +49,16 @@ final class RecommendationStore: ObservableObject {
         self.rawSearchResults = searchResults
         self.feed = feed
         self.searchResults = searchResults
+        self.searchSuggestions = searchSuggestions
+        self.searchHistory = Self.loadSearchHistory()
         self.hotSearches = hotSearches
         self.selectedIngredientNames = Self.normalizedNames(from: selectedIngredientNames)
         self.isLoading = isLoading
         self.isSearching = isSearching
+        self.isFetchingSuggestions = false
         self.errorMessage = errorMessage
         self.searchErrorMessage = nil
+        self.lastSubmittedQuery = nil
     }
 
     func setSelectedIngredientNames(_ names: [String]) {
@@ -88,11 +101,25 @@ final class RecommendationStore: ObservableObject {
         query = keyword
     }
 
+    func clearSearchHistory() {
+        searchHistory = []
+        UserDefaults.standard.removeObject(forKey: Self.searchHistoryKey)
+    }
+
     func clearSearchResults() {
         rawSearchResults = []
         searchResults = []
+        searchSuggestions = []
         isSearching = false
+        isFetchingSuggestions = false
         searchErrorMessage = nil
+        lastSubmittedQuery = nil
+        latestSuggestionQuery = nil
+    }
+
+    var hasCommittedSearchForCurrentQuery: Bool {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmedQuery.isEmpty && trimmedQuery == lastSubmittedQuery
     }
 
     func stateAdjustedRecipe(for recipe: RecipeSummary) -> RecipeSummary {
@@ -132,6 +159,29 @@ final class RecommendationStore: ObservableObject {
         refreshDisplayedRecipes()
     }
 
+    func handleSearchQueryChanged(_ newValue: String) async {
+        let trimmedQuery = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if trimmedQuery.isEmpty {
+            rawSearchResults = []
+            searchResults = []
+            searchSuggestions = []
+            searchErrorMessage = nil
+            lastSubmittedQuery = nil
+            latestSuggestionQuery = nil
+            isFetchingSuggestions = false
+            return
+        }
+
+        if trimmedQuery != lastSubmittedQuery {
+            rawSearchResults = []
+            searchResults = []
+            searchErrorMessage = nil
+        }
+
+        await refreshSearchSuggestions(for: trimmedQuery)
+    }
+
     func searchRecipes() async {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else {
@@ -141,11 +191,13 @@ final class RecommendationStore: ObservableObject {
 
         isSearching = true
         searchErrorMessage = nil
+        lastSubmittedQuery = trimmedQuery
 
         do {
             let response = try await service.searchRecipes(query: trimmedQuery)
             rawSearchResults = response.data.recipes
             searchResults = applyInteractionState(to: rawSearchResults)
+            appendSearchHistory(trimmedQuery)
         } catch {
             searchErrorMessage = error.localizedDescription
             rawSearchResults = []
@@ -208,6 +260,30 @@ final class RecommendationStore: ObservableObject {
         hasLoadedHotSearches = true
     }
 
+    private func refreshSearchSuggestions(for query: String) async {
+        latestSuggestionQuery = query
+        isFetchingSuggestions = true
+
+        do {
+            let response = try await service.fetchSearchSuggestions(query: query)
+            guard latestSuggestionQuery == query else { return }
+            searchSuggestions = mergedSuggestionList(
+                remote: response.data,
+                query: query
+            )
+        } catch {
+            guard latestSuggestionQuery == query else { return }
+            searchSuggestions = mergedSuggestionList(
+                remote: [],
+                query: query
+            )
+        }
+
+        if latestSuggestionQuery == query {
+            isFetchingSuggestions = false
+        }
+    }
+
     private static func normalizedNames(from names: [String]) -> [String] {
         var seen = Set<String>()
 
@@ -240,6 +316,46 @@ final class RecommendationStore: ObservableObject {
     private func refreshDisplayedRecipes() {
         feed = applyInteractionState(to: rawFeed)
         searchResults = applyInteractionState(to: rawSearchResults)
+    }
+
+    private func mergedSuggestionList(remote: [String], query: String) -> [String] {
+        let localCandidates = (searchHistory + hotSearches + feed.map(\.title))
+            .filter { $0.localizedCaseInsensitiveContains(query) }
+
+        var seen = Set<String>()
+
+        return (remote + localCandidates).compactMap { item in
+            let trimmed = item.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            let key = trimmed.lowercased()
+            guard seen.insert(key).inserted else { return nil }
+            return trimmed
+        }
+    }
+
+    private func appendSearchHistory(_ keyword: String) {
+        let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        searchHistory.removeAll { $0.caseInsensitiveCompare(trimmed) == .orderedSame }
+        searchHistory.insert(trimmed, at: 0)
+
+        if searchHistory.count > Self.maxSearchHistoryCount {
+            searchHistory = Array(searchHistory.prefix(Self.maxSearchHistoryCount))
+        }
+
+        UserDefaults.standard.set(searchHistory, forKey: Self.searchHistoryKey)
+    }
+
+    private static func loadSearchHistory() -> [String] {
+        guard let stored = UserDefaults.standard.array(forKey: Self.searchHistoryKey) as? [String] else {
+            return []
+        }
+
+        return stored.compactMap { item in
+            let trimmed = item.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
     }
 }
 

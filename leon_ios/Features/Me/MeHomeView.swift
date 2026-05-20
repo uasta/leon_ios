@@ -11,9 +11,12 @@ struct MeHomeView: View {
     @State private var isBootstrappingSession: Bool = false
     @State private var authErrorMessage: String?
     @State private var isLoggingOut: Bool = false
+    @State private var debugStatusMessage: String?
+    @State private var isRunningDebugCheck: Bool = false
 
     private let authService = AuthService(client: APIClient())
     private let profileService = ProfileService(client: APIClient())
+    private let recommendationService = RecommendationService(client: APIClient())
 
     var body: some View {
         NavigationStack {
@@ -21,12 +24,13 @@ struct MeHomeView: View {
                 accountSection
                 behaviorSection
                 navigationPreferenceSection
+                debugSection
                 settingsSection
             }
             .listStyle(.insetGrouped)
             .navigationTitle("我的")
             .sheet(isPresented: $showLoginSheet) {
-                LoginSheetView()
+                AuthSheetView(initialMode: .login)
             }
             .task {
                 await bootstrapAuthenticatedStateIfNeeded()
@@ -178,6 +182,46 @@ struct MeHomeView: View {
         }
     }
 
+    private var debugSection: some View {
+        Section {
+            LabeledContent("接口地址", value: apiBaseURLDisplay)
+
+            if isRunningDebugCheck {
+                ProgressView("正在执行联调测试")
+            } else {
+                Button("测试推荐接口") {
+                    Task {
+                        await runRecommendationDebugCheck()
+                    }
+                }
+
+                Button("测试搜索接口") {
+                    Task {
+                        await runSearchDebugCheck()
+                    }
+                }
+
+                Button("测试当前登录态") {
+                    Task {
+                        await runSessionDebugCheck()
+                    }
+                }
+            }
+
+            if let debugStatusMessage {
+                Text(debugStatusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("这里专门承接当前阶段的接口联调与状态排查，不再把服务状态常驻放在推荐页。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("联调测试")
+        }
+    }
+
     private func bootstrapAuthenticatedStateIfNeeded() async {
         guard sessionStore.isAuthenticated else {
             profileStore.resetToLocalPreview()
@@ -261,129 +305,50 @@ struct MeHomeView: View {
 
         isLoggingOut = false
     }
-}
 
-private struct LoginSheetView: View {
-    @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var ingredientStore: IngredientStore
-    @EnvironmentObject private var recommendationStore: RecommendationStore
-    @EnvironmentObject private var sessionStore: SessionStore
-    @EnvironmentObject private var preferenceStore: PreferenceStore
-    @EnvironmentObject private var profileStore: ProfileStore
+    private func runRecommendationDebugCheck() async {
+        isRunningDebugCheck = true
+        defer { isRunningDebugCheck = false }
 
-    @State private var email: String = ""
-    @State private var password: String = ""
-    @State private var isSubmitting: Bool = false
-    @State private var errorMessage: String?
-
-    private let authService = AuthService(client: APIClient())
-    private let ingredientService = IngredientService(client: APIClient())
-    private let profileService = ProfileService(client: APIClient())
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    TextField("邮箱", text: $email)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.emailAddress)
-
-                    SecureField("密码", text: $password)
-                } header: {
-                    Text("开发环境登录")
-                } footer: {
-                    Text("当前后端先走邮箱账号体系。登录后会自动同步本地食材和导航偏好。")
-                }
-
-                Section {
-                    Label("同步本地食材到账号", systemImage: "arrow.triangle.2.circlepath")
-                    Label("同步当前 Tab 顺序偏好", systemImage: "square.grid.3x1.folder.badge.plus")
-                    Label("拉取我的点赞、收藏和历史", systemImage: "tray.full")
-                } header: {
-                    Text("登录后会发生什么")
-                }
-
-                if let errorMessage {
-                    Section {
-                        Text(errorMessage)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } header: {
-                        Text("状态")
-                    }
-                }
-            }
-            .navigationTitle("登录")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") {
-                        dismiss()
-                    }
-                    .disabled(isSubmitting)
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    if isSubmitting {
-                        ProgressView()
-                    } else {
-                        Button("登录") {
-                            Task {
-                                await submit()
-                            }
-                        }
-                        .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
-                    }
-                }
-            }
+        do {
+            let response = try await recommendationService.fetchRecommendationFeed()
+            debugStatusMessage = "推荐接口正常，当前返回 \(response.data.count) 条内容。"
+        } catch {
+            debugStatusMessage = "推荐接口异常：\(error.localizedDescription)"
         }
     }
 
-    private func submit() async {
-        isSubmitting = true
-        errorMessage = nil
+    private func runSearchDebugCheck() async {
+        isRunningDebugCheck = true
+        defer { isRunningDebugCheck = false }
 
         do {
-            let loginResponse = try await authService.login(email: email, password: password)
-            let loginData = loginResponse.data
-            sessionStore.configureAuthenticatedSession(user: loginData.user, token: loginData.token)
-
-            var syncNotes: [String] = []
-            let drafts = ingredientStore.activeSyncDrafts()
-            if !drafts.isEmpty {
-                do {
-                    let syncResponse = try await ingredientService.bootstrapLocalIngredients(drafts)
-                    syncNotes.append(
-                        "食材同步 \(syncResponse.data.syncedCount) 项"
-                    )
-                } catch {
-                    syncNotes.append("食材同步失败")
-                }
-            } else {
-                syncNotes.append("没有待同步食材")
-            }
-
-            do {
-                let preferenceResponse = try await profileService.updatePreferences(tabOrder: preferenceStore.tabOrder)
-                preferenceStore.applyRemoteTabOrder(preferenceResponse.data.tabOrder)
-                syncNotes.append("偏好已同步")
-            } catch {
-                syncNotes.append("偏好同步失败")
-            }
-
-            await profileStore.refresh()
-            recommendationStore.applyProfileSnapshot(
-                likedRecipeIDs: profileStore.likedRecipeIDs,
-                favoritedRecipeIDs: profileStore.favoritedRecipeIDs
-            )
-            profileStore.markSyncMessage(syncNotes.joined(separator: "，"))
-            dismiss()
+            let response = try await recommendationService.searchRecipes(query: "番茄")
+            debugStatusMessage = "搜索接口正常，关键词“番茄”返回 \(response.data.recipes.count) 条结果。"
         } catch {
-            errorMessage = error.localizedDescription
+            debugStatusMessage = "搜索接口异常：\(error.localizedDescription)"
+        }
+    }
+
+    private func runSessionDebugCheck() async {
+        isRunningDebugCheck = true
+        defer { isRunningDebugCheck = false }
+
+        if !sessionStore.isAuthenticated {
+            debugStatusMessage = "当前是匿名状态，推荐、搜索和食材本地流程可以直接体验。"
+            return
         }
 
-        isSubmitting = false
+        do {
+            let response = try await authService.fetchCurrentUser()
+            debugStatusMessage = "登录态正常，当前账号：\(response.data.email)。"
+        } catch {
+            debugStatusMessage = "登录态检查失败：\(error.localizedDescription)"
+        }
+    }
+
+    private var apiBaseURLDisplay: String {
+        (Bundle.main.object(forInfoDictionaryKey: "LEON_API_BASE_URL") as? String) ?? "未配置"
     }
 }
 
@@ -401,7 +366,9 @@ private struct RecipeCollectionView: View {
                 )
             } else {
                 List(recipes) { recipe in
-                    NavigationLink(value: recipe) {
+                    NavigationLink {
+                        RecipeDetailView(recipe: recipe)
+                    } label: {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(spacing: 8) {
                                 Text(recipe.title)
@@ -428,9 +395,6 @@ private struct RecipeCollectionView: View {
                     }
                 }
                 .listStyle(.insetGrouped)
-                .navigationDestination(for: RecipeSummary.self) { recipe in
-                    RecipeDetailView(recipe: recipe)
-                }
             }
         }
         .navigationTitle(title)

@@ -6,6 +6,20 @@ actor AuthService {
         let password: String
     }
 
+    struct RegisterRequest: Encodable {
+        let name: String
+        let email: String
+        let password: String
+        let passwordConfirmation: String
+
+        enum CodingKeys: String, CodingKey {
+            case name
+            case email
+            case password
+            case passwordConfirmation = "password_confirmation"
+        }
+    }
+
     struct LoginResponse: Decodable {
         let user: AppUser
         let token: String
@@ -16,6 +30,10 @@ actor AuthService {
             case token
             case tokenType = "token_type"
         }
+    }
+
+    struct RegisterResponse: Decodable {
+        let user: AppUser
     }
 
     private let client: APIClient
@@ -37,6 +55,23 @@ actor AuthService {
             body: body
         )
         return try await client.send(request, as: LoginResponse.self)
+    }
+
+    func register(name: String, email: String, password: String, passwordConfirmation: String) async throws -> APIEnvelope<RegisterResponse> {
+        let body = try JSONEncoder().encode(
+            RegisterRequest(
+                name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                email: email.trimmingCharacters(in: .whitespacesAndNewlines),
+                password: password,
+                passwordConfirmation: passwordConfirmation
+            )
+        )
+        let request = APIRequest(
+            path: "api/register",
+            method: .post,
+            body: body
+        )
+        return try await client.send(request, as: RegisterResponse.self)
     }
 
     func fetchCurrentUser() async throws -> APIEnvelope<AppUser> {
