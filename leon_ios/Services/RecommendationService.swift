@@ -20,6 +20,20 @@ actor RecommendationService {
         let recipes: [RecipeSummary]
     }
 
+    struct DailyRecommendationResponse: Decodable {
+        let date: String
+        let featured: RecipeSummary?
+        let alternatives: [RecipeSummary]
+        let preferredFlavors: [String]
+
+        enum CodingKeys: String, CodingKey {
+            case date
+            case featured
+            case alternatives
+            case preferredFlavors = "preferred_flavors"
+        }
+    }
+
     struct RecommendationFeedPage: Decodable {
         let items: [RecipeSummary]
         let page: Int
@@ -115,5 +129,29 @@ actor RecommendationService {
             body: body
         )
         return try await client.send(request, as: ByIngredientsResponse.self)
+    }
+
+    func fetchDailyRecommendation(
+        date: String? = nil,
+        ingredients: [String] = [],
+        limit: Int = 5
+    ) async throws -> APIEnvelope<DailyRecommendationResponse> {
+        var queryItems = [
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        if let date, !date.isEmpty {
+            queryItems.append(URLQueryItem(name: "date", value: date))
+        }
+        for name in ingredients.prefix(20) {
+            queryItems.append(URLQueryItem(name: "ingredients[]", value: name))
+        }
+
+        return try await client.send(
+            APIRequest(
+                path: "api/v1/recommendations/daily",
+                queryItems: queryItems
+            ),
+            as: DailyRecommendationResponse.self
+        )
     }
 }

@@ -1,28 +1,13 @@
 import SwiftUI
+import UIKit
 
 struct RecommendHomeView: View {
-    private enum DiscoverChannel: String, CaseIterable, Identifiable {
-        case all
-        case quick
-        case home
-        case stock
-
-        var id: String { rawValue }
-
-        var title: String {
-            switch self {
-            case .all: return L10n.text(L10n.Recommend.channelAll)
-            case .quick: return L10n.text(L10n.Recommend.channelQuick)
-            case .home: return L10n.text(L10n.Recommend.channelHome)
-            case .stock: return L10n.text(L10n.Recommend.channelStock)
-            }
-        }
-    }
-
     @EnvironmentObject private var store: RecommendationStore
+    @EnvironmentObject private var ingredientStore: IngredientStore
 
     @State private var isSearchPresented: Bool = false
-    @State private var selectedChannel: DiscoverChannel = .all
+    @State private var isStockFilterEnabled: Bool = false
+    @State private var stockFilterMessage: String?
 
     private let hotSearchColumns = [
         GridItem(.adaptive(minimum: 92), spacing: 10, alignment: .leading)
@@ -36,16 +21,15 @@ struct RecommendHomeView: View {
         isSearchPresented || !trimmedQuery.isEmpty || store.hasCommittedSearchForCurrentQuery || store.isSearching
     }
 
-    private var displayedFeed: [RecipeSummary] {
-        switch selectedChannel {
-        case .all:
-            return store.feed
-        case .quick:
-            return filteredFeed(matching: ["快手", "10 分钟", "15 分钟", "简单"])
-        case .home:
-            return filteredFeed(matching: ["家常", "下饭", "番茄", "土豆"])
-        case .stock:
-            return filteredFeed(matching: ["清库存", "食材", "适合", "主食材"])
+    private var activeIngredientNames: [String] {
+        var seen = Set<String>()
+        return ingredientStore.items.compactMap { item in
+            guard !item.isArchived else { return nil }
+            let name = item.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            let key = name.lowercased()
+            guard seen.insert(key).inserted else { return nil }
+            return name
         }
     }
 
@@ -61,7 +45,6 @@ struct RecommendHomeView: View {
                         searchSection
                     } else {
                         discoverHeroSection
-                        discoverChannelSection
                         recommendationSection
                     }
                 }
@@ -84,6 +67,18 @@ struct RecommendHomeView: View {
                     await store.handleSearchQueryChanged(newValue)
                 }
             }
+            .task {
+                await store.loadFeedIfNeeded()
+                prefetchCoverImages(for: store.feed)
+                await store.loadDailyIfNeeded(ingredientNames: activeIngredientNames)
+                await store.loadHotSearchesIfNeeded()
+            }
+            .onChange(of: store.feed.map(\.id)) { _, _ in
+                prefetchCoverImages(for: store.feed)
+            }
+            .onChange(of: store.selectedIngredientNames) { _, names in
+                isStockFilterEnabled = !names.isEmpty
+            }
             .refreshable {
                 if isShowingSearchMode {
                     if store.hasCommittedSearchForCurrentQuery {
@@ -93,11 +88,8 @@ struct RecommendHomeView: View {
                     }
                 } else {
                     await store.retry()
+                    await store.refreshDaily(ingredientNames: activeIngredientNames)
                 }
-            }
-            .task {
-                await store.loadFeedIfNeeded()
-                await store.loadHotSearchesIfNeeded()
             }
         }
     }
@@ -105,6 +97,8 @@ struct RecommendHomeView: View {
     private var contextSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader(L10n.text(L10n.Recommend.contextTitle), actionTitle: L10n.text(L10n.Action.clear)) {
+                isStockFilterEnabled = false
+                stockFilterMessage = nil
                 store.clearSelectedIngredientNames()
             }
 
@@ -126,9 +120,7 @@ struct RecommendHomeView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(L10n.text(L10n.Recommend.heroTitle))
                         .font(.system(size: 28, weight: .bold, design: .rounded))
-                    Text(store.selectedIngredientNames.isEmpty
-                         ? L10n.text(L10n.Recommend.heroSubtitleDefault)
-                         : L10n.text(L10n.Recommend.heroSubtitleWithIngredients))
+                    Text(heroSubtitleText)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -147,85 +139,143 @@ struct RecommendHomeView: View {
                 .buttonStyle(.plain)
             }
 
-            HStack(spacing: 10) {
-                heroMetricCard(title: L10n.text(L10n.Recommend.heroMetricToday), value: "\(store.feed.count)", accent: Color(red: 0.94, green: 0.43, blue: 0.34))
-                heroMetricCard(title: L10n.text(L10n.Recommend.heroMetricHot), value: "\(store.hotSearches.count)", accent: Color(red: 0.33, green: 0.62, blue: 0.84))
-                heroMetricCard(title: L10n.text(L10n.Recommend.heroMetricRecent), value: "\(store.searchHistory.count)", accent: Color(red: 0.36, green: 0.66, blue: 0.47))
-            }
+            if store.isLoadingDaily && store.dailyFeatured == nil {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 120)
+            } else if let featured = store.dailyFeatured {
+                NavigationLink(value: featured) {
+                    dailyFeaturedCard(featured)
+                }
+                .buttonStyle(.plain)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(store.hotSearches.prefix(6), id: \.self) { keyword in
-                        Button {
-                            store.applySearchKeyword(keyword)
-                            isSearchPresented = true
-                            Task {
-                                await store.searchRecipes()
+                if !store.dailyAlternatives.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(store.dailyAlternatives) { recipe in
+                                NavigationLink(value: recipe) {
+                                    Text(recipe.title)
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(Color(red: 0.34, green: 0.21, blue: 0.09))
+                                        .lineLimit(1)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 9)
+                                        .background(Color.white.opacity(0.78), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
                             }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "flame.fill")
-                                    .font(.caption)
-                                Text(keyword)
-                                    .font(.subheadline.weight(.medium))
-                            }
-                            .foregroundStyle(Color(red: 0.34, green: 0.21, blue: 0.09))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
-                            .background(Color.white.opacity(0.78), in: Capsule())
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 2)
                     }
                 }
-                .padding(.horizontal, 2)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(store.hotSearches.prefix(6), id: \.self) { keyword in
+                            Button {
+                                store.applySearchKeyword(keyword)
+                                isSearchPresented = true
+                                Task {
+                                    await store.searchRecipes()
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "flame.fill")
+                                        .font(.caption)
+                                    Text(keyword)
+                                        .font(.subheadline.weight(.medium))
+                                }
+                                .foregroundStyle(Color(red: 0.34, green: 0.21, blue: 0.09))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 9)
+                                .background(Color.white.opacity(0.78), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
             }
         }
         .padding(18)
         .background(discoverHeroBackground, in: RoundedRectangle(cornerRadius: 26))
     }
 
-    private var discoverChannelSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(L10n.text(L10n.Recommend.channelSection))
-                    .font(.headline)
-                Spacer()
-                Text(channelSubtitle)
+    private var heroSubtitleText: String {
+        if !store.preferredFlavors.isEmpty {
+            return L10n.Recommend.heroSubtitleFlavors(store.preferredFlavors.joined(separator: "、"))
+        }
+        if !store.selectedIngredientNames.isEmpty {
+            return L10n.text(L10n.Recommend.heroSubtitleWithIngredients)
+        }
+        return L10n.text(L10n.Recommend.heroSubtitleDefault)
+    }
+
+    private func dailyFeaturedCard(_ recipe: RecipeSummary) -> some View {
+        HStack(spacing: 12) {
+            Group {
+                if let coverURL = recipe.coverURL,
+                   let url = RecipeImageURLValidator.validImageURL(from: coverURL) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        default:
+                            Color.white.opacity(0.55)
+                        }
+                    }
+                } else {
+                    Color.white.opacity(0.55)
+                }
+            }
+            .frame(width: 88, height: 88)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.text(L10n.Recommend.dailyBadge))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.75, green: 0.36, blue: 0.18))
+
+                Text(recipe.title)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+
+                Text(recipe.matchReason ?? L10n.text(L10n.Recommend.cardReasonPlaceholder))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(DiscoverChannel.allCases) { channel in
-                        Button {
-                            selectedChannel = channel
-                        } label: {
-                            Text(channel.title)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(selectedChannel == channel ? .white : .primary)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 9)
-                                .background(
-                                    selectedChannel == channel
-                                        ? AnyShapeStyle(LinearGradient(colors: [Color(red: 0.94, green: 0.42, blue: 0.35), Color(red: 0.96, green: 0.61, blue: 0.31)], startPoint: .leading, endPoint: .trailing))
-                                        : AnyShapeStyle(Color(.secondarySystemBackground)),
-                                    in: Capsule()
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 2)
-            }
+            Spacer(minLength: 0)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
         }
+        .padding(12)
+        .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     private var recommendationSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(store.selectedIngredientNames.isEmpty
-                          ? L10n.text(L10n.Recommend.feedTitle)
-                          : L10n.text(L10n.Recommend.feedTitleByIngredients))
+            HStack(alignment: .center, spacing: 10) {
+                Text(store.selectedIngredientNames.isEmpty
+                     ? L10n.text(L10n.Recommend.feedTitle)
+                     : L10n.text(L10n.Recommend.feedTitleByIngredients))
+                    .font(.headline)
+
+                Spacer(minLength: 0)
+
+                stockFilterButton
+            }
+
+            if let stockFilterMessage {
+                Text(stockFilterMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             if store.isLoading && store.feed.isEmpty {
                 ProgressView(L10n.text(L10n.Recommend.feedLoading))
@@ -237,14 +287,14 @@ struct RecommendHomeView: View {
                     description: Text(errorMessage)
                 )
                 .frame(maxWidth: .infinity, minHeight: 160)
-            } else if displayedFeed.isEmpty {
+            } else if store.feed.isEmpty {
                 ContentUnavailableView(
                     L10n.text(L10n.Recommend.feedEmptyTitle),
                     systemImage: "fork.knife",
                     description: Text(L10n.text(L10n.Recommend.feedEmptySubtitle))
                 )
             } else {
-                waterfallGrid(displayedFeed)
+                waterfallGrid(store.feed)
 
                 if store.isLoadingMore {
                     ProgressView()
@@ -253,6 +303,47 @@ struct RecommendHomeView: View {
                 }
             }
         }
+    }
+
+    private var stockFilterButton: some View {
+        Button {
+            toggleStockFilter()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: isStockFilterEnabled ? "refrigerator.fill" : "refrigerator")
+                Text(L10n.text(L10n.Recommend.filterStock))
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(isStockFilterEnabled ? .white : .primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                isStockFilterEnabled
+                    ? AnyShapeStyle(AppTheme.accent)
+                    : AnyShapeStyle(Color(.secondarySystemBackground)),
+                in: Capsule()
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func toggleStockFilter() {
+        if isStockFilterEnabled {
+            isStockFilterEnabled = false
+            stockFilterMessage = nil
+            store.clearSelectedIngredientNames()
+            return
+        }
+
+        let names = Array(activeIngredientNames.prefix(20))
+        guard !names.isEmpty else {
+            stockFilterMessage = L10n.text(L10n.Recommend.filterStockEmpty)
+            return
+        }
+
+        isStockFilterEnabled = true
+        stockFilterMessage = nil
+        store.setSelectedIngredientNames(names)
     }
 
     private var searchSection: some View {
@@ -351,8 +442,15 @@ struct RecommendHomeView: View {
         }
     }
 
+    private var feedColumnWidth: CGFloat {
+        let horizontalPadding: CGFloat = 14 * 2
+        let columnSpacing: CGFloat = 12
+        return floor((UIScreen.main.bounds.width - horizontalPadding - columnSpacing) / 2)
+    }
+
     private func waterfallGrid(_ recipes: [RecipeSummary]) -> some View {
         let lanes = waterfallColumns(for: recipes)
+        let columnWidth = feedColumnWidth
 
         return HStack(alignment: .top, spacing: 12) {
             ForEach(Array(lanes.enumerated()), id: \.offset) { entry in
@@ -360,9 +458,10 @@ struct RecommendHomeView: View {
                 LazyVStack(spacing: 12) {
                     ForEach(lane) { recipe in
                         NavigationLink(value: recipe) {
-                            RecipeCard(recipe: recipe)
+                            RecipeCard(recipe: recipe, columnWidth: columnWidth)
                         }
                         .buttonStyle(.plain)
+                        .frame(width: columnWidth)
                         .onAppear {
                             Task {
                                 await store.loadMoreFeedIfNeeded(currentRecipeID: recipe.id)
@@ -370,7 +469,7 @@ struct RecommendHomeView: View {
                         }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .top)
+                .frame(width: columnWidth, alignment: .top)
             }
         }
     }
@@ -389,10 +488,32 @@ struct RecommendHomeView: View {
     }
 
     private func estimatedCardHeight(for recipe: RecipeSummary) -> CGFloat {
-        let titleWeight = CGFloat(max(recipe.title.count, 12)) * 1.7
-        let reasonWeight = CGFloat(max(recipe.matchReason?.count ?? 26, 22)) * 1.0
-        let bannerBase = CGFloat(132 + (recipe.id % 3) * 28)
-        return bannerBase + titleWeight + reasonWeight + 96
+        let contentWidth = feedColumnWidth - RecipeCard.horizontalPadding * 2
+        let imageAspect: CGFloat = {
+            if let url = RecipeImageURLValidator.validImageURL(from: recipe.coverURL) {
+                return RecipeCoverImageCache.shared.aspect(
+                    for: url,
+                    fallback: RecipeCoverImageCache.estimatedAspect(forRecipeID: recipe.id)
+                )
+            }
+            return RecipeCoverImageCache.estimatedAspect(forRecipeID: recipe.id)
+        }()
+        let imageHeight = contentWidth * imageAspect
+        let titleHeight: CGFloat = 40
+        let reasonHeight: CGFloat = 32
+        let footerHeight: CGFloat = 34
+        let cardPadding: CGFloat = RecipeCard.horizontalPadding * 2
+        let spacing: CGFloat = 16
+        return imageHeight + titleHeight + reasonHeight + footerHeight + cardPadding + spacing
+    }
+
+    private func prefetchCoverImages(for recipes: [RecipeSummary]) {
+        let urls = recipes.compactMap { RecipeImageURLValidator.validImageURL(from: $0.coverURL) }
+        RecipeCoverImageCache.shared.prefetch(
+            urls: urls,
+            minAspect: RecipeCard.minImageAspect,
+            maxAspect: RecipeCard.maxImageAspect
+        )
     }
 
     private func keywordChips(_ keywords: [String]) -> some View {
@@ -467,15 +588,6 @@ struct RecommendHomeView: View {
         }
     }
 
-    private func filteredFeed(matching keywords: [String]) -> [RecipeSummary] {
-        let filtered = store.feed.filter { recipe in
-            let source = [recipe.title, recipe.matchReason ?? ""].joined(separator: " ")
-            return keywords.contains { source.localizedCaseInsensitiveContains($0) }
-        }
-
-        return filtered.isEmpty ? store.feed : filtered
-    }
-
     private func heroMetricCard(title: String, value: String, accent: Color) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
@@ -507,40 +619,45 @@ struct RecommendHomeView: View {
             endPoint: .bottomTrailing
         )
     }
-
-    private var channelSubtitle: String {
-        switch selectedChannel {
-        case .all:
-            return L10n.text(L10n.Recommend.channelSubtitleAll)
-        case .quick:
-            return L10n.text(L10n.Recommend.channelSubtitleQuick)
-        case .home:
-            return L10n.text(L10n.Recommend.channelSubtitleHome)
-        case .stock:
-            return L10n.text(L10n.Recommend.channelSubtitleStock)
-        }
-    }
 }
 
 private struct RecipeCard: View {
     let recipe: RecipeSummary
+    let columnWidth: CGFloat
+
+    static let horizontalPadding: CGFloat = 10
+    /// 高度下限 / 上限相对宽度的比例，避免极端横图过矮、竖图过长。
+    static let minImageAspect: CGFloat = 0.72
+    static let maxImageAspect: CGFloat = 1.75
+
+    private var contentWidth: CGFloat {
+        max(columnWidth - Self.horizontalPadding * 2, 0)
+    }
+
+    private var estimatedImageAspect: CGFloat {
+        if let url = RecipeImageURLValidator.validImageURL(from: recipe.coverURL) {
+            return RecipeCoverImageCache.shared.aspect(
+                for: url,
+                fallback: RecipeCoverImageCache.estimatedAspect(forRecipeID: recipe.id)
+            )
+        }
+        return RecipeCoverImageCache.estimatedAspect(forRecipeID: recipe.id)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             bannerView
-                .frame(height: bannerHeight)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(recipe.title)
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.primary)
-                    .lineLimit(3)
+                    .lineLimit(2)
 
-                Text(recipe.matchReason ?? L10n.text(L10n.Recommend.cardReasonPlaceholder))
+                Text(displayMatchReason)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(4)
+                    .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
@@ -565,78 +682,91 @@ private struct RecipeCard: View {
                     }
                 }
 
-                Spacer()
+                Spacer(minLength: 0)
 
                 Label(displayLikes, systemImage: recipe.favorited ? "heart.fill" : "heart")
                     .font(.caption)
                     .foregroundStyle(recipe.favorited ? Color.red : .secondary)
             }
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
+        .padding(Self.horizontalPadding)
+        .frame(width: columnWidth, alignment: .topLeading)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var displayMatchReason: String {
+        let fallback = L10n.text(L10n.Recommend.cardReasonPlaceholder)
+        guard let reason = recipe.matchReason?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !reason.isEmpty else {
+            return fallback
+        }
+
+        if reason.contains("://") || reason.lowercased().contains(".html") {
+            return fallback
+        }
+
+        return reason
     }
 
     private var bannerView: some View {
-        ZStack {
-            if let coverURL = recipe.coverURL, let url = URL(string: coverURL) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .failure:
-                        cardGradientFill
-                    default:
-                        cardGradientFill
-                            .overlay {
-                                ProgressView()
-                                    .tint(.white)
-                            }
-                    }
-                }
-            } else {
-                cardGradientFill
-            }
-        }
-        .overlay(alignment: .bottomLeading) {
+        ZStack(alignment: .bottomLeading) {
+            bannerImageFill
+
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.28)],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+
             VStack(alignment: .leading, spacing: 8) {
                 Text(cardBadgeText)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(.black.opacity(0.18), in: Capsule())
+                    .background(.black.opacity(0.22), in: Capsule())
 
-                HStack(spacing: 8) {
-                    ForEach(cardTags, id: \.self) { tag in
-                        Text(tag)
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(.white.opacity(0.16), in: Capsule())
-                    }
+                if let primaryTag = cardTags.first {
+                    Text(primaryTag)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.92))
                 }
             }
             .padding(10)
         }
+        .frame(width: contentWidth)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(alignment: .topTrailing) {
-            VStack(alignment: .trailing, spacing: 6) {
-                Image(systemName: recipe.favorited ? "bookmark.fill" : "sparkles")
-                    .font(.caption.weight(.semibold))
-                Text(displayHeat)
-                    .font(.caption2.weight(.medium))
-            }
-            .foregroundStyle(.white)
-            .padding(10)
+            Text(displayHeat)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(.black.opacity(0.22), in: Capsule())
+                .padding(10)
         }
     }
 
-    private var cardGradientFill: some View {
-        Rectangle()
-            .fill(cardGradient)
+    @ViewBuilder
+    private var bannerImageFill: some View {
+        if let url = RecipeImageURLValidator.validImageURL(from: recipe.coverURL) {
+            AdaptiveCoverImage(
+                url: url,
+                width: contentWidth,
+                minAspect: Self.minImageAspect,
+                maxAspect: Self.maxImageAspect,
+                placeholderAspect: estimatedImageAspect,
+                placeholder: { aspect in
+                    Rectangle()
+                        .fill(cardGradient)
+                        .frame(width: contentWidth, height: contentWidth * aspect)
+                }
+            )
+        } else {
+            Rectangle()
+                .fill(cardGradient)
+                .frame(width: contentWidth, height: contentWidth * estimatedImageAspect)
+        }
     }
 
     private var cardBadgeText: String {
@@ -661,10 +791,6 @@ private struct RecipeCard: View {
         }
 
         return LinearGradient(colors: [Color(red: 0.23, green: 0.62, blue: 0.47), Color(red: 0.74, green: 0.83, blue: 0.40)], startPoint: .topLeading, endPoint: .bottomTrailing)
-    }
-
-    private var bannerHeight: CGFloat {
-        CGFloat(132 + (recipe.id % 3) * 28)
     }
 
     private var cardTags: [String] {
@@ -697,7 +823,7 @@ private struct RecipeCard: View {
     }
 
     private var displayHeat: String {
-        L10n.Recommend.cardHeat(70 + recipe.id % 29)
+        L10n.Recommend.cardHeat(recipe.heat ?? 0)
     }
 
     private var authorName: String {
@@ -711,8 +837,7 @@ private struct RecipeCard: View {
     }
 
     private var authorInitial: String {
-        let source = authorName
-        return String(source.prefix(1))
+        String(authorName.prefix(1))
     }
 
     private var channelText: String {
@@ -737,8 +862,97 @@ private struct RecipeCard: View {
     }
 }
 
+/// 固定宽度；高度在首帧锁定（缓存比例优先，否则用预估），加载完成后只淡入图片，不再改高度。
+private struct AdaptiveCoverImage<Placeholder: View>: View {
+    let url: URL
+    let width: CGFloat
+    let minAspect: CGFloat
+    let maxAspect: CGFloat
+    let placeholderAspect: CGFloat
+    @ViewBuilder let placeholder: (_ aspect: CGFloat) -> Placeholder
+
+    @State private var image: UIImage?
+    @State private var aspect: CGFloat
+    @State private var imageOpacity: Double
+    @State private var loadFailed = false
+
+    init(
+        url: URL,
+        width: CGFloat,
+        minAspect: CGFloat,
+        maxAspect: CGFloat,
+        placeholderAspect: CGFloat,
+        @ViewBuilder placeholder: @escaping (_ aspect: CGFloat) -> Placeholder
+    ) {
+        self.url = url
+        self.width = width
+        self.minAspect = minAspect
+        self.maxAspect = maxAspect
+        self.placeholderAspect = placeholderAspect
+        self.placeholder = placeholder
+
+        if let cached = RecipeCoverImageCache.shared.entry(for: url) {
+            _image = State(initialValue: cached.image)
+            _aspect = State(initialValue: cached.aspect)
+            _imageOpacity = State(initialValue: 1)
+        } else {
+            _image = State(initialValue: nil)
+            _aspect = State(initialValue: placeholderAspect)
+            _imageOpacity = State(initialValue: 0)
+        }
+    }
+
+    private var displayHeight: CGFloat {
+        width * aspect
+    }
+
+    var body: some View {
+        ZStack {
+            placeholder(aspect)
+
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: width, height: displayHeight)
+                    .clipped()
+                    .opacity(imageOpacity)
+            } else if !loadFailed {
+                ProgressView()
+                    .tint(.white)
+            }
+        }
+        .frame(width: width, height: displayHeight)
+        .task(id: url.absoluteString) {
+            await loadImageIfNeeded()
+        }
+    }
+
+    private func loadImageIfNeeded() async {
+        if image != nil {
+            return
+        }
+
+        guard let entry = await RecipeCoverImageCache.shared.image(
+            for: url,
+            minAspect: minAspect,
+            maxAspect: maxAspect
+        ) else {
+            loadFailed = true
+            return
+        }
+
+        // 高度已在首帧锁定，这里只淡入图片，避免文案出来后整卡闪动。
+        image = entry.image
+        withAnimation(.easeInOut(duration: 0.22)) {
+            imageOpacity = 1
+        }
+    }
+}
+
 #Preview {
     RecommendHomeView()
         .environmentObject(RecommendationStore(feed: RecommendationStore.sampleFeed))
+        .environmentObject(IngredientStore())
         .environmentObject(SessionStore())
 }

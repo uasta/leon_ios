@@ -175,6 +175,10 @@ extension L10n {
             "recommend.hero.subtitle_with_ingredients",
             defaultValue: "已经把你勾选的食材带进来了，先从更接近可开做的方向帮你铺开。"
         )
+        static func heroSubtitleFlavors(_ flavors: String) -> String {
+            L10n.format("recommend.hero.subtitle_flavors", flavors)
+        }
+        static let dailyBadge = LocalizedStringResource("recommend.daily.badge", defaultValue: "今日推荐")
         static let heroMetricToday = LocalizedStringResource("recommend.hero.metric_today", defaultValue: "今日推荐")
         static let heroMetricHot = LocalizedStringResource("recommend.hero.metric_hot", defaultValue: "热门词")
         static let heroMetricRecent = LocalizedStringResource("recommend.hero.metric_recent", defaultValue: "最近搜索")
@@ -183,6 +187,11 @@ extension L10n {
         static let feedTitleByIngredients = LocalizedStringResource(
             "recommend.feed.title_by_ingredients",
             defaultValue: "按食材推荐"
+        )
+        static let filterStock = LocalizedStringResource("recommend.filter.stock", defaultValue: "清库存")
+        static let filterStockEmpty = LocalizedStringResource(
+            "recommend.filter.stock_empty",
+            defaultValue: "先在食材页添加食材，再来清库存"
         )
         static let feedLoading = LocalizedStringResource("recommend.feed.loading", defaultValue: "正在准备推荐")
         static let feedEmptyTitle = LocalizedStringResource("recommend.feed.empty_title", defaultValue: "还没有推荐结果")
@@ -335,6 +344,23 @@ extension L10n {
         static let fallbackStep3 = LocalizedStringResource(
             "recommend.detail.fallback_step_3",
             defaultValue: "等后端详情接口进一步补全更完整的步骤。"
+        )
+
+        static func detailIngredientsCount(_ count: Int) -> String {
+            L10n.format("recommend.detail.ingredients_count", count)
+        }
+
+        static let galleryTapHint = LocalizedStringResource(
+            "recommend.gallery.tap_hint",
+            defaultValue: "点击查看大图"
+        )
+        static let galleryEmptyTitle = LocalizedStringResource(
+            "recommend.gallery.empty_title",
+            defaultValue: "暂无图片"
+        )
+        static let galleryEmptySubtitle = LocalizedStringResource(
+            "recommend.gallery.empty_subtitle",
+            defaultValue: "这道菜谱还没有可展示的图片。"
         )
     }
 

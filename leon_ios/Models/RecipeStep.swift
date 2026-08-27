@@ -32,8 +32,9 @@ struct RecipeStep: Identifiable, Hashable, Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let index = try container.decodeIfPresent(Int.self, forKey: .index) ?? 0
         let text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
-        let imageURL = try container.decodeIfPresent(String.self, forKey: .imageURL)
-            ?? try container.decodeIfPresent(String.self, forKey: .imageFilename)
+        let imageURLFromField = try container.decodeIfPresent(String.self, forKey: .imageURL)
+        let imageURLFromFilename = try container.decodeIfPresent(String.self, forKey: .imageFilename)
+        let imageURL = imageURLFromField ?? imageURLFromFilename
         self.index = index
         self.text = text
         self.imageURL = imageURL

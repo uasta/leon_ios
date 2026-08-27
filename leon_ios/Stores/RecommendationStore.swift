@@ -18,6 +18,10 @@ final class RecommendationStore: ObservableObject {
     @Published private(set) var searchHistory: [String]
     @Published private(set) var hotSearches: [String]
     @Published private(set) var selectedIngredientNames: [String]
+    @Published private(set) var dailyFeatured: RecipeSummary?
+    @Published private(set) var dailyAlternatives: [RecipeSummary]
+    @Published private(set) var preferredFlavors: [String]
+    @Published private(set) var isLoadingDaily: Bool
     @Published private(set) var isLoading: Bool
     @Published private(set) var isLoadingMore: Bool
     @Published private(set) var hasMoreFeed: Bool
@@ -33,6 +37,7 @@ final class RecommendationStore: ObservableObject {
     private var feedPage: Int = 0
     private var hasLoadedFeed = false
     private var hasLoadedHotSearches = false
+    private var hasLoadedDaily = false
     private var interactionOverrides: [Int: InteractionState] = [:]
     private var latestSuggestionQuery: String?
 
@@ -56,6 +61,10 @@ final class RecommendationStore: ObservableObject {
         self.searchHistory = Self.loadSearchHistory()
         self.hotSearches = hotSearches
         self.selectedIngredientNames = Self.normalizedNames(from: selectedIngredientNames)
+        self.dailyFeatured = nil
+        self.dailyAlternatives = []
+        self.preferredFlavors = []
+        self.isLoadingDaily = false
         self.isLoading = isLoading
         self.isLoadingMore = false
         self.hasMoreFeed = false
@@ -107,6 +116,32 @@ final class RecommendationStore: ObservableObject {
     func loadHotSearchesIfNeeded() async {
         guard !hasLoadedHotSearches else { return }
         await refreshHotSearches()
+    }
+
+    func loadDailyIfNeeded(ingredientNames: [String] = []) async {
+        guard !hasLoadedDaily, !isLoadingDaily else { return }
+        await refreshDaily(ingredientNames: ingredientNames)
+    }
+
+    func refreshDaily(ingredientNames: [String] = []) async {
+        isLoadingDaily = true
+
+        do {
+            let response = try await service.fetchDailyRecommendation(
+                ingredients: Self.normalizedNames(from: ingredientNames)
+            )
+            dailyFeatured = response.data.featured.map(applyInteractionState(to:))
+            dailyAlternatives = applyInteractionState(to: response.data.alternatives)
+            preferredFlavors = response.data.preferredFlavors
+            hasLoadedDaily = true
+        } catch {
+            if dailyFeatured == nil {
+                dailyFeatured = feed.first
+                dailyAlternatives = Array(feed.dropFirst().prefix(4))
+            }
+        }
+
+        isLoadingDaily = false
     }
 
     func refreshForCurrentContext() async {
@@ -342,6 +377,10 @@ final class RecommendationStore: ObservableObject {
     private func refreshDisplayedRecipes() {
         feed = applyInteractionState(to: rawFeed)
         searchResults = applyInteractionState(to: rawSearchResults)
+        if let dailyFeatured {
+            self.dailyFeatured = applyInteractionState(to: dailyFeatured)
+        }
+        dailyAlternatives = applyInteractionState(to: dailyAlternatives)
     }
 
     private func mergedSuggestionList(remote: [String], query: String) -> [String] {
@@ -400,6 +439,7 @@ extension RecommendationStore {
             title: "番茄炒蛋",
             coverURL: nil,
             matchReason: "适合从常见家常食材快速开做",
+            heat: 128,
             liked: false,
             favorited: true
         ),
@@ -408,6 +448,7 @@ extension RecommendationStore {
             title: "青椒土豆丝",
             coverURL: nil,
             matchReason: "适合清库存，做法也比较稳",
+            heat: 96,
             liked: false,
             favorited: false
         ),
@@ -416,6 +457,7 @@ extension RecommendationStore {
             title: "土豆炖牛肉",
             coverURL: nil,
             matchReason: "适合一次消耗多种主食材",
+            heat: 210,
             liked: true,
             favorited: true
         ),

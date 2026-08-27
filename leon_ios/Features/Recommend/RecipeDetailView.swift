@@ -14,6 +14,8 @@ struct RecipeDetailView: View {
     @State private var isSubmittingAction: Bool = false
     @State private var errorMessage: String?
     @State private var showAuthSheet: Bool = false
+    @State private var galleryPresented: Bool = false
+    @State private var galleryIndex: Int = 0
 
     private let service = RecommendationService(client: APIClient())
     private let profileService = ProfileService(client: APIClient())
@@ -31,69 +33,78 @@ struct RecipeDetailView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let detail {
                 List {
-                    if let coverURL = detail.coverURL, let url = URL(string: coverURL) {
+                    if let coverURL = detail.coverURL,
+                       let url = RecipeImageURLValidator.validImageURL(from: coverURL) {
                         Section {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .success(let image):
-                                    image
-                                        .resizable()
-                                        .scaledToFill()
-                                default:
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color(.secondarySystemBackground))
-                                        .overlay {
-                                            ProgressView()
-                                        }
-                                }
+                            Button {
+                                openGallery(at: indexOfImageURL(url))
+                            } label: {
+                                recipeRemoteImage(url: url)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 260)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                             }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 220)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                            .buttonStyle(.plain)
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+                            .listRowBackground(Color.clear)
                         }
                     }
 
                     Section {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(effectiveRecipe.title)
-                                .font(.title3.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(alignment: .top, spacing: 12) {
+                                Text(effectiveRecipe.title)
+                                    .font(.title3.weight(.semibold))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                            Text(effectiveRecipe.matchReason ?? L10n.text(L10n.Recommend.detailReasonFallback))
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                HStack(spacing: 16) {
+                                    Button {
+                                        Task { await toggleFavorite() }
+                                    } label: {
+                                        Image(systemName: effectiveFavorited ? "bookmark.fill" : "bookmark")
+                                            .font(.title3)
+                                            .foregroundStyle(effectiveFavorited ? AppTheme.accent : .primary)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(isSubmittingAction)
+                                    .accessibilityLabel(L10n.text(L10n.Recommend.detailFavorite))
+
+                                    Button {
+                                        Task { await toggleLike() }
+                                    } label: {
+                                        Image(systemName: effectiveLiked ? "hand.thumbsup.fill" : "hand.thumbsup")
+                                            .font(.title3)
+                                            .foregroundStyle(effectiveLiked ? .orange : .primary)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(isSubmittingAction)
+                                    .accessibilityLabel(L10n.text(L10n.Recommend.detailLike))
+                                }
+                            }
+
+                            if let reason = displayMatchReason {
+                                Text(reason)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         .padding(.vertical, 4)
                     }
 
-                    Section(L10n.text(L10n.Recommend.detailActionsSection)) {
-                        actionRow(
-                            title: L10n.text(L10n.Recommend.detailLike),
-                            systemImage: effectiveLiked ? "hand.thumbsup.fill" : "hand.thumbsup",
-                            tint: .orange
-                        ) {
-                            await toggleLike()
-                        }
+                    Section {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text(L10n.text(L10n.Recommend.detailIngredients))
+                                    .font(.headline)
+                                Spacer(minLength: 0)
+                                Text(L10n.Recommend.detailIngredientsCount(detail.ingredients.count))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
 
-                        actionRow(
-                            title: L10n.text(L10n.Recommend.detailFavorite),
-                            systemImage: effectiveFavorited ? "bookmark.fill" : "bookmark",
-                            tint: .blue
-                        ) {
-                            await toggleFavorite()
+                            IngredientTagFlow(items: detail.ingredients)
                         }
-
-                        Text(sessionStore.isAuthenticated
-                             ? L10n.text(L10n.Recommend.detailSyncHintAuthed)
-                             : L10n.text(L10n.Recommend.detailSyncHintGuest))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Section(L10n.text(L10n.Recommend.detailIngredients)) {
-                        ForEach(detail.ingredients, id: \.self) { item in
-                            Text(item)
-                        }
+                        .padding(.vertical, 2)
                     }
 
                     Section(L10n.text(L10n.Recommend.detailSteps)) {
@@ -102,26 +113,24 @@ struct RecipeDetailView: View {
                                 Text(L10n.Recommend.detailStep(step.index > 0 ? step.index : 1))
                                     .font(.subheadline.weight(.semibold))
 
-                                if let imageURL = step.imageURL, let url = URL(string: imageURL) {
-                                    AsyncImage(url: url) { phase in
-                                        switch phase {
-                                        case .success(let image):
-                                            image
-                                                .resizable()
-                                                .scaledToFill()
-                                        default:
-                                            EmptyView()
-                                        }
+                                if let imageURL = step.imageURL,
+                                   let url = RecipeImageURLValidator.validImageURL(from: imageURL) {
+                                    Button {
+                                        openGallery(at: indexOfImageURL(url))
+                                    } label: {
+                                        recipeRemoteImage(url: url)
+                                            .frame(maxWidth: .infinity)
+                                            .frame(height: 180)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                     }
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 180)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    .buttonStyle(.plain)
                                 }
 
                                 Text(step.text)
                                     .font(.body)
+                                    .foregroundStyle(.primary)
                             }
-                            .padding(.vertical, 4)
+                            .padding(.vertical, 2)
                         }
                     }
 
@@ -156,30 +165,81 @@ struct RecipeDetailView: View {
         .sheet(isPresented: $showAuthSheet) {
             AuthSheetView(initialMode: .login)
         }
+        .fullScreenCover(isPresented: $galleryPresented) {
+            RecipeImageGalleryView(
+                imageURLs: galleryImageURLs,
+                selectedIndex: $galleryIndex
+            )
+        }
     }
 
-    private func actionRow(
-        title: String,
-        systemImage: String,
-        tint: Color,
-        action: @escaping () async -> Void
-    ) -> some View {
-        Button {
-            Task {
-                await action()
-            }
-        } label: {
-            HStack {
-                Label(title, systemImage: systemImage)
-                    .foregroundStyle(tint)
-                Spacer()
-                if isSubmittingAction {
-                    ProgressView()
-                        .controlSize(.small)
-                }
+    private var displayMatchReason: String? {
+        guard let reason = effectiveRecipe.matchReason?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !reason.isEmpty else {
+            return nil
+        }
+
+        if reason.contains("评分") || reason.contains("默认推荐流") || reason.contains("推荐骨架") {
+            return nil
+        }
+
+        return reason
+    }
+
+    @ViewBuilder
+    private func recipeRemoteImage(url: URL) -> some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .success(let image):
+                image
+                    .resizable()
+                    .scaledToFill()
+            case .failure:
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+                    .overlay {
+                        Image(systemName: "photo")
+                            .foregroundStyle(.secondary)
+                    }
+            default:
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+                    .overlay {
+                        ProgressView()
+                    }
             }
         }
-        .disabled(isSubmittingAction)
+        .clipped()
+    }
+
+    private var galleryImageURLs: [URL] {
+        guard let detail else { return [] }
+
+        var urls: [URL] = []
+        if let coverURL = detail.coverURL,
+           let url = RecipeImageURLValidator.validImageURL(from: coverURL) {
+            urls.append(url)
+        }
+
+        for step in detail.steps {
+            guard let imageURL = step.imageURL,
+                  let url = RecipeImageURLValidator.validImageURL(from: imageURL),
+                  !urls.contains(url) else { continue }
+            urls.append(url)
+        }
+
+        return urls
+    }
+
+    private func openGallery(at index: Int) {
+        guard !galleryImageURLs.isEmpty else { return }
+        galleryIndex = min(max(index, 0), galleryImageURLs.count - 1)
+        galleryPresented = true
+    }
+
+    private func indexOfImageURL(_ url: URL) -> Int {
+        galleryImageURLs.firstIndex(of: url) ?? 0
     }
 
     private func loadDetail() async {
@@ -301,6 +361,72 @@ struct RecipeDetailView: View {
     }
 }
 
+private struct IngredientTagFlow: View {
+    let items: [String]
+
+    var body: some View {
+        FlowLayout(spacing: 8) {
+            ForEach(items, id: \.self) { item in
+                Text(item)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Color(.tertiarySystemGroupedBackground), in: Capsule())
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 0
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+        }
+
+        return CGSize(width: width, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+
+            subview.place(
+                at: CGPoint(x: x, y: y),
+                proposal: ProposedViewSize(width: size.width, height: size.height)
+            )
+
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+        }
+    }
+}
+
 #Preview {
     NavigationStack {
         RecipeDetailView(
@@ -308,7 +434,8 @@ struct RecipeDetailView: View {
                 id: 101,
                 title: "番茄炒蛋",
                 coverURL: nil,
-                matchReason: "适合快手开做",
+                matchReason: "十分钟 · 简单",
+                heat: 36,
                 liked: false,
                 favorited: true
             )

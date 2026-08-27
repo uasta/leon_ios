@@ -5,6 +5,7 @@ struct RecipeSummary: Identifiable, Hashable, Codable {
     var title: String
     var coverURL: String?
     var matchReason: String?
+    var heat: Int?
     var liked: Bool
     var favorited: Bool
 
@@ -13,6 +14,7 @@ struct RecipeSummary: Identifiable, Hashable, Codable {
         case title
         case coverURL = "cover_url"
         case matchReason = "match_reason"
+        case heat
         case liked
         case favorited
     }
