@@ -19,6 +19,8 @@ final class RecommendationStore: ObservableObject {
     @Published private(set) var hotSearches: [String]
     @Published private(set) var selectedIngredientNames: [String]
     @Published private(set) var isLoading: Bool
+    @Published private(set) var isLoadingMore: Bool
+    @Published private(set) var hasMoreFeed: Bool
     @Published private(set) var isSearching: Bool
     @Published private(set) var isFetchingSuggestions: Bool
     @Published private(set) var errorMessage: String?
@@ -28,6 +30,7 @@ final class RecommendationStore: ObservableObject {
     private let service: RecommendationService
     private var rawFeed: [RecipeSummary]
     private var rawSearchResults: [RecipeSummary]
+    private var feedPage: Int = 0
     private var hasLoadedFeed = false
     private var hasLoadedHotSearches = false
     private var interactionOverrides: [Int: InteractionState] = [:]
@@ -54,6 +57,8 @@ final class RecommendationStore: ObservableObject {
         self.hotSearches = hotSearches
         self.selectedIngredientNames = Self.normalizedNames(from: selectedIngredientNames)
         self.isLoading = isLoading
+        self.isLoadingMore = false
+        self.hasMoreFeed = false
         self.isSearching = isSearching
         self.isFetchingSuggestions = false
         self.errorMessage = errorMessage
@@ -74,6 +79,29 @@ final class RecommendationStore: ObservableObject {
     func loadFeedIfNeeded() async {
         guard !hasLoadedFeed, !isLoading else { return }
         await refreshForCurrentContext()
+    }
+
+    func loadMoreFeedIfNeeded(currentRecipeID: Int?) async {
+        guard selectedIngredientNames.isEmpty else { return }
+        guard hasMoreFeed, !isLoading, !isLoadingMore else { return }
+        guard let currentRecipeID else { return }
+        guard rawFeed.suffix(4).contains(where: { $0.id == currentRecipeID }) else { return }
+
+        isLoadingMore = true
+
+        do {
+            let response = try await service.fetchRecommendationFeed(page: feedPage + 1)
+            feedPage = response.data.page
+            hasMoreFeed = response.data.hasMore
+            rawFeed.append(contentsOf: response.data.items)
+            feed = applyInteractionState(to: rawFeed)
+        } catch {
+            if errorMessage == nil {
+                errorMessage = error.localizedDescription
+            }
+        }
+
+        isLoadingMore = false
     }
 
     func loadHotSearchesIfNeeded() async {
@@ -210,10 +238,14 @@ final class RecommendationStore: ObservableObject {
     private func refreshDefaultFeed() async {
         isLoading = true
         errorMessage = nil
+        feedPage = 0
+        hasMoreFeed = false
 
         do {
-            let response = try await service.fetchRecommendationFeed()
-            rawFeed = response.data
+            let response = try await service.fetchRecommendationFeed(page: 1)
+            feedPage = response.data.page
+            hasMoreFeed = response.data.hasMore
+            rawFeed = response.data.items
             feed = applyInteractionState(to: rawFeed)
             hasLoadedFeed = true
         } catch {
@@ -230,6 +262,8 @@ final class RecommendationStore: ObservableObject {
     private func refreshFeedByIngredients() async {
         isLoading = true
         errorMessage = nil
+        feedPage = 0
+        hasMoreFeed = false
 
         do {
             let response = try await service.fetchByIngredients(selectedIngredientNames)

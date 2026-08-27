@@ -1,83 +1,70 @@
 import SwiftUI
 
+/// App 设置中心：承接语言等通用偏好，并为后续提醒 / 数据能力预留入口。
 struct SettingsView: View {
-    @State private var showLoginSheet: Bool = false
+    @EnvironmentObject private var languageStore: LanguageStore
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Button {
-                        showLoginSheet = true
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("登录以开启同步")
-                                    .font(.headline)
-                                Text("换手机也不丢数据，未来可支持家庭共享。")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.footnote)
-                                .foregroundStyle(.tertiary)
-                        }
+        List {
+            Section {
+                Picker(selection: $languageStore.language) {
+                    ForEach(AppLanguage.allCases) { option in
+                        Text(option.titleKey).tag(option)
                     }
+                } label: {
+                    Label(L10n.Settings.language, systemImage: "globe")
                 }
-
-                Section("提醒") {
-                    LabeledContent("临期提前", value: "2 天（占位）")
-                    LabeledContent("提醒时段", value: "09:00（占位）")
-                }
-
-                Section("数据") {
-                    Button("导出/备份（占位）") {}
-                    Button("导入（占位）") {}
-                }
+                .pickerStyle(.navigationLink)
+            } header: {
+                Text(L10n.Settings.general)
+            } footer: {
+                Text(L10n.Settings.languageFooter)
             }
-            .listStyle(.insetGrouped)
-            .navigationTitle("设置")
-            .sheet(isPresented: $showLoginSheet) {
-                LoginPlaceholderView()
+
+            Section {
+                LabeledContent(L10n.Settings.reminderLead, value: L10n.text(L10n.Settings.reminderLeadValue))
+                LabeledContent(L10n.Settings.reminderTime, value: L10n.text(L10n.Settings.reminderTimeValue))
+            } header: {
+                Text(L10n.Settings.reminders)
+            }
+
+            Section {
+                Button(L10n.Settings.exportBackup) {}
+                    .disabled(true)
+                Button(L10n.Settings.importData) {}
+                    .disabled(true)
+            } header: {
+                Text(L10n.Settings.data)
+            }
+
+            Section {
+                LabeledContent(L10n.Settings.version, value: appVersionDisplay)
+            } header: {
+                Text(L10n.Settings.about)
             }
         }
+        .listStyle(.insetGrouped)
+        .navigationTitle(L10n.Settings.title)
+        .navigationBarTitleDisplayMode(.inline)
     }
-}
 
-private struct LoginPlaceholderView: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Button {
-                        // TODO: 接微信授权登录
-                    } label: {
-                        Label("微信授权登录（占位）", systemImage: "message.fill")
-                    }
-                    Button {
-                        // TODO: 接手机号验证码登录
-                    } label: {
-                        Label("手机号登录/注册（占位）", systemImage: "phone.fill")
-                    }
-                } footer: {
-                    Text("建议先不强制登录：你可以先用本地模式体验，只有在需要同步/换机/共享时再登录。")
-                }
-            }
-            .navigationTitle("登录")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
-                }
-            }
+    private var appVersionDisplay: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        switch (version, build) {
+        case let (version?, build?):
+            return "\(version) (\(build))"
+        case let (version?, nil):
+            return version
+        default:
+            return L10n.text(L10n.Common.notConfigured)
         }
     }
 }
 
 #Preview {
-    SettingsView()
+    NavigationStack {
+        SettingsView()
+    }
+    .environmentObject(LanguageStore.shared)
 }
-

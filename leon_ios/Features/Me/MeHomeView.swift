@@ -24,13 +24,22 @@ struct MeHomeView: View {
                 accountSection
                 behaviorSection
                 navigationPreferenceSection
-                debugSection
                 settingsSection
+                #if DEBUG
+                debugSection
+                #endif
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("我的")
+            .scrollContentBackground(.hidden)
+            .appScreenBackground()
+            .navigationTitle(L10n.Me.title)
             .sheet(isPresented: $showLoginSheet) {
                 AuthSheetView(initialMode: .login)
+                    .environmentObject(ingredientStore)
+                    .environmentObject(recommendationStore)
+                    .environmentObject(sessionStore)
+                    .environmentObject(preferenceStore)
+                    .environmentObject(profileStore)
             }
             .task {
                 await bootstrapAuthenticatedStateIfNeeded()
@@ -61,38 +70,64 @@ struct MeHomeView: View {
                     }
 
                     if isLoggingOut {
-                        ProgressView("正在退出")
+                        ProgressView(L10n.Auth.loggingOut)
                     } else {
-                        Button("退出登录", role: .destructive) {
+                        Button(L10n.Auth.logout, role: .destructive) {
                             Task {
                                 await logout()
                             }
                         }
                     }
                 } else if isBootstrappingSession {
-                    ProgressView("正在恢复登录状态")
+                    ProgressView(L10n.Auth.restoringSession)
                 } else {
-                    Text("登录状态已存在，正在准备账号信息。")
+                    Text(L10n.Auth.preparingAccount)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Button {
-                    showLoginSheet = true
-                } label: {
-                    HStack {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(AppTheme.accentSoft)
+                                .frame(width: 44, height: 44)
+
+                            Image(systemName: "person.crop.circle.badge.plus")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(AppTheme.accent)
+                        }
+
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("登录以同步我的数据")
+                            Text(L10n.Me.loginPromptTitle)
                                 .font(.headline)
-                            Text("本地食材、点赞、收藏、历史和导航偏好都会在这里承接。")
+                            Text(L10n.Me.loginPromptSubtitle)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .foregroundStyle(.tertiary)
                     }
+
+                    Button {
+                        showLoginSheet = true
+                    } label: {
+                        Text(L10n.Auth.loginRegister)
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .foregroundStyle(.white)
+                            .background(
+                                LinearGradient(
+                                    colors: [AppTheme.accent, Color(red: 0.28, green: 0.52, blue: 1.0)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                ),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            )
+                    }
+                    .buttonStyle(.plain)
                 }
+                .padding(.vertical, 4)
             }
 
             if let authErrorMessage {
@@ -101,7 +136,7 @@ struct MeHomeView: View {
                     .foregroundStyle(.secondary)
             }
         } header: {
-            Text("账号")
+            Text(L10n.Me.sectionAccount)
         }
     }
 
@@ -109,25 +144,25 @@ struct MeHomeView: View {
         Section {
             if sessionStore.isAuthenticated {
                 if profileStore.isLoading {
-                    ProgressView("正在加载我的数据")
+                    ProgressView(L10n.Me.loadingProfile)
                 }
 
                 NavigationLink {
-                    RecipeCollectionView(title: "我的点赞", recipes: profileStore.likes)
+                    RecipeCollectionView(title: L10n.text(L10n.Me.myLikes), recipes: profileStore.likes)
                 } label: {
-                    LabeledContent("点赞", value: "\(profileStore.likes.count)")
+                    LabeledContent(L10n.Me.likes, value: "\(profileStore.likes.count)")
                 }
 
                 NavigationLink {
-                    RecipeCollectionView(title: "我的收藏", recipes: profileStore.favorites)
+                    RecipeCollectionView(title: L10n.text(L10n.Me.myFavorites), recipes: profileStore.favorites)
                 } label: {
-                    LabeledContent("收藏", value: "\(profileStore.favorites.count)")
+                    LabeledContent(L10n.Me.favorites, value: "\(profileStore.favorites.count)")
                 }
 
                 NavigationLink {
-                    RecipeCollectionView(title: "最近浏览", recipes: profileStore.history)
+                    RecipeCollectionView(title: L10n.text(L10n.Me.recentHistory), recipes: profileStore.history)
                 } label: {
-                    LabeledContent("历史", value: "\(profileStore.history.count)")
+                    LabeledContent(L10n.Me.history, value: "\(profileStore.history.count)")
                 }
 
                 if let errorMessage = profileStore.errorMessage {
@@ -137,22 +172,22 @@ struct MeHomeView: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("先体验，再决定是否登录")
+                    Text(L10n.Me.anonymousTitle)
                         .font(.subheadline.weight(.medium))
-                    Text("匿名阶段也能录食材、看推荐；登录后再把这些数据同步到账号。")
+                    Text(L10n.Me.anonymousSubtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
         } header: {
-            Text("行为沉淀")
+            Text(L10n.Me.sectionBehavior)
         }
     }
 
     private var navigationPreferenceSection: some View {
         Section {
             Toggle(
-                "推荐排在食材前",
+                L10n.Me.preferRecommendFirst,
                 isOn: Binding(
                     get: { preferenceStore.preferRecommendFirst },
                     set: { newValue in
@@ -164,44 +199,63 @@ struct MeHomeView: View {
                 )
             )
 
-            Text("“我的”固定在最右，当前阶段只允许“食材”和“推荐”互换顺序。")
+            Text(L10n.Me.tabOrderHint)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } header: {
-            Text("导航偏好")
+            Text(L10n.Me.sectionNavigation)
         }
     }
 
     private var settingsSection: some View {
         Section {
-            LabeledContent("鉴权状态", value: sessionStore.isAuthenticated ? "已登录" : "匿名")
-            LabeledContent("本地食材", value: "\(ingredientStore.activeSyncDrafts().count) 项待同步基底")
-            LabeledContent("网络层", value: "APIClient 已接入")
+            NavigationLink {
+                SettingsView()
+            } label: {
+                Label(L10n.Settings.entry, systemImage: "gearshape")
+            }
+
+            NavigationLink {
+                RemindersView()
+            } label: {
+                Label(L10n.Me.reminders, systemImage: "bell.badge")
+            }
+
+            LabeledContent(
+                L10n.Me.authStatus,
+                value: sessionStore.isAuthenticated
+                    ? L10n.text(L10n.Me.authenticated)
+                    : L10n.text(L10n.Me.anonymous)
+            )
+            LabeledContent(
+                L10n.Me.localIngredients,
+                value: L10n.Me.pendingSyncCount(ingredientStore.activeSyncDrafts().count)
+            )
         } header: {
-            Text("设置入口")
+            Text(L10n.Me.sectionMore)
         }
     }
 
     private var debugSection: some View {
         Section {
-            LabeledContent("接口地址", value: apiBaseURLDisplay)
+            LabeledContent(L10n.Me.apiBaseURL, value: apiBaseURLDisplay)
 
             if isRunningDebugCheck {
-                ProgressView("正在执行联调测试")
+                ProgressView(L10n.Me.debugRunning)
             } else {
-                Button("测试推荐接口") {
+                Button(L10n.Me.debugRecommend) {
                     Task {
                         await runRecommendationDebugCheck()
                     }
                 }
 
-                Button("测试搜索接口") {
+                Button(L10n.Me.debugSearch) {
                     Task {
                         await runSearchDebugCheck()
                     }
                 }
 
-                Button("测试当前登录态") {
+                Button(L10n.Me.debugSession) {
                     Task {
                         await runSessionDebugCheck()
                     }
@@ -213,12 +267,12 @@ struct MeHomeView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("这里专门承接当前阶段的接口联调与状态排查，不再把服务状态常驻放在推荐页。")
+                Text(L10n.Me.debugHint)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         } header: {
-            Text("联调测试")
+            Text(L10n.Me.sectionDebug)
         }
     }
 
@@ -282,11 +336,11 @@ struct MeHomeView: View {
         guard sessionStore.isAuthenticated else { return }
 
         do {
-            let response = try await profileService.updatePreferences(tabOrder: preferenceStore.tabOrder)
+            let response = try await profileService.updatePreferences(tabOrder: preferenceStore.syncableTabOrder)
             preferenceStore.applyRemoteTabOrder(response.data.tabOrder)
-            profileStore.markSyncMessage("导航偏好已同步")
+            profileStore.markSyncMessage(L10n.text(L10n.Me.preferenceSynced))
         } catch {
-            profileStore.markSyncMessage("导航偏好同步失败：\(error.localizedDescription)")
+            profileStore.markSyncMessage(L10n.Me.preferenceSyncFailed(error.localizedDescription))
         }
     }
 
@@ -312,9 +366,9 @@ struct MeHomeView: View {
 
         do {
             let response = try await recommendationService.fetchRecommendationFeed()
-            debugStatusMessage = "推荐接口正常，当前返回 \(response.data.count) 条内容。"
+            debugStatusMessage = L10n.Me.debugRecommendOK(response.data.items.count)
         } catch {
-            debugStatusMessage = "推荐接口异常：\(error.localizedDescription)"
+            debugStatusMessage = L10n.Me.debugRecommendFail(error.localizedDescription)
         }
     }
 
@@ -324,9 +378,9 @@ struct MeHomeView: View {
 
         do {
             let response = try await recommendationService.searchRecipes(query: "番茄")
-            debugStatusMessage = "搜索接口正常，关键词“番茄”返回 \(response.data.recipes.count) 条结果。"
+            debugStatusMessage = L10n.Me.debugSearchOK(response.data.recipes.count)
         } catch {
-            debugStatusMessage = "搜索接口异常：\(error.localizedDescription)"
+            debugStatusMessage = L10n.Me.debugSearchFail(error.localizedDescription)
         }
     }
 
@@ -335,20 +389,21 @@ struct MeHomeView: View {
         defer { isRunningDebugCheck = false }
 
         if !sessionStore.isAuthenticated {
-            debugStatusMessage = "当前是匿名状态，推荐、搜索和食材本地流程可以直接体验。"
+            debugStatusMessage = L10n.text(L10n.Me.debugAnonymous)
             return
         }
 
         do {
             let response = try await authService.fetchCurrentUser()
-            debugStatusMessage = "登录态正常，当前账号：\(response.data.email)。"
+            debugStatusMessage = L10n.Me.debugSessionOK(response.data.email)
         } catch {
-            debugStatusMessage = "登录态检查失败：\(error.localizedDescription)"
+            debugStatusMessage = L10n.Me.debugSessionFail(error.localizedDescription)
         }
     }
 
     private var apiBaseURLDisplay: String {
-        (Bundle.main.object(forInfoDictionaryKey: "LEON_API_BASE_URL") as? String) ?? "未配置"
+        (Bundle.main.object(forInfoDictionaryKey: "LEON_API_BASE_URL") as? String)
+            ?? L10n.text(L10n.Common.notConfigured)
     }
 }
 
@@ -360,9 +415,9 @@ private struct RecipeCollectionView: View {
         Group {
             if recipes.isEmpty {
                 ContentUnavailableView(
-                    "还没有内容",
+                    L10n.Me.emptyTitle,
                     systemImage: "tray",
-                    description: Text("继续去看推荐、点收藏或浏览详情，这里就会慢慢沉淀起来。")
+                    description: Text(L10n.Me.emptySubtitle)
                 )
             } else {
                 List(recipes) { recipe in
@@ -387,7 +442,7 @@ private struct RecipeCollectionView: View {
                                 }
                             }
 
-                            Text(recipe.matchReason ?? "来自账号行为记录")
+                            Text(recipe.matchReason ?? L10n.text(L10n.Common.fromAccountBehavior))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

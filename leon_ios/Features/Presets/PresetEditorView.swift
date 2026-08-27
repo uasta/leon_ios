@@ -19,7 +19,7 @@ struct PresetEditorView: View {
     init(preset: IngredientPreset?) {
         self.original = preset
         _name = State(initialValue: preset?.name ?? "")
-        _defaultUnit = State(initialValue: preset?.defaultUnit ?? "份")
+        _defaultUnit = State(initialValue: preset?.defaultUnit ?? L10n.text(L10n.Action.unitPortion))
         _defaultLocation = State(initialValue: preset?.defaultLocation ?? .fridgeChill)
 
         switch preset?.icon {
@@ -46,34 +46,34 @@ struct PresetEditorView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("名称", text: $name)
-                    TextField("默认单位（如：个/枚/kg）", text: $defaultUnit)
-                    Picker("默认位置", selection: $defaultLocation) {
+                    TextField(L10n.text(L10n.Action.name), text: $name)
+                    TextField(L10n.text(L10n.Presets.unitPrompt), text: $defaultUnit)
+                    Picker(L10n.text(L10n.Presets.defaultLocation), selection: $defaultLocation) {
                         ForEach(Ingredient.Location.allCases) { loc in
-                            Label(loc.rawValue, systemImage: loc.systemImage)
+                            Label(loc.localizedTitle, systemImage: loc.systemImage)
                                 .tag(loc)
                         }
                     }
                 }
 
-                Section("图标") {
-                    Picker("类型", selection: $iconMode) {
-                        Text("系统图标").tag(IconMode.system)
-                        Text("图片资源").tag(IconMode.asset)
+                Section(L10n.text(L10n.Presets.iconSection)) {
+                    Picker(L10n.text(L10n.Presets.iconType), selection: $iconMode) {
+                        Text(L10n.text(L10n.Presets.iconSystem)).tag(IconMode.system)
+                        Text(L10n.text(L10n.Presets.iconAsset)).tag(IconMode.asset)
                     }
 
                     if iconMode == .system {
-                        TextField("SF Symbol 名称", text: $systemIconName)
+                        TextField(L10n.text(L10n.Presets.sfSymbol), text: $systemIconName)
                         HStack {
-                            Text("预览")
+                            Text(L10n.text(L10n.Action.preview))
                             Spacer()
                             Image(systemName: systemIconName.isEmpty ? "questionmark" : systemIconName)
                                 .foregroundStyle(.secondary)
                         }
                     } else {
-                        TextField("Assets 名称", text: $assetIconName)
+                        TextField(L10n.text(L10n.Presets.assetName), text: $assetIconName)
                         HStack {
-                            Text("预览")
+                            Text(L10n.text(L10n.Action.preview))
                             Spacer()
                             if assetIconName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                 Image(systemName: "photo")
@@ -89,27 +89,27 @@ struct PresetEditorView: View {
                     }
                 }
 
-                Section("到期模板") {
-                    Toggle("使用默认到期天数", isOn: $hasExpiryTemplate.animation(.default))
+                Section(L10n.text(L10n.Presets.expirySection)) {
+                    Toggle(L10n.text(L10n.Presets.useExpiryDays), isOn: $hasExpiryTemplate.animation(.default))
                     if hasExpiryTemplate {
                         Stepper(value: $expiryDays, in: 0...365) {
-                            Text("默认 \(expiryDays) 天")
+                            Text(L10n.Presets.defaultDays(expiryDays))
                         }
                     }
                 }
 
-                Section("默认标签") {
-                    TextField("用空格分隔（如：蔬菜 肉类）", text: $tagsText)
+                Section(L10n.text(L10n.Presets.defaultTags)) {
+                    TextField(L10n.text(L10n.Ingredients.tagsPrompt), text: $tagsText)
                 }
             }
-            .navigationTitle(original == nil ? "新增预设" : "编辑预设")
+            .navigationTitle(original == nil ? L10n.text(L10n.Presets.editorTitleNew) : L10n.text(L10n.Presets.editorTitleEdit))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button(L10n.text(L10n.Common.cancel)) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { saveAndDismiss() }
+                    Button(L10n.text(L10n.Action.save)) { saveAndDismiss() }
                         .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
@@ -118,7 +118,7 @@ struct PresetEditorView: View {
 
     private func saveAndDismiss() {
         let cleanedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let unit = defaultUnit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "份" : defaultUnit
+        let unit = defaultUnit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? L10n.text(L10n.Action.unitPortion) : defaultUnit
         let tags = tagsText
             .split(whereSeparator: \.isWhitespace)
             .map { String($0) }

@@ -81,4 +81,36 @@ actor AuthService {
     func logout() async throws -> APIEnvelope<EmptyPayload> {
         try await client.send(APIRequest(path: "api/logout", method: .post), as: EmptyPayload.self)
     }
+
+    func resendVerification(email: String) async throws -> APIEnvelope<EmptyPayload> {
+        struct ResendRequest: Encodable {
+            let email: String
+        }
+
+        let body = try JSONEncoder().encode(
+            ResendRequest(email: email.trimmingCharacters(in: .whitespacesAndNewlines))
+        )
+        let request = APIRequest(
+            path: "api/resend-verification",
+            method: .post,
+            body: body
+        )
+        return try await client.send(request, as: EmptyPayload.self)
+    }
+
+    func forgotPassword(email: String) async throws -> APIEnvelope<EmptyPayload> {
+        struct ForgotPasswordRequest: Encodable {
+            let email: String
+        }
+
+        let body = try JSONEncoder().encode(
+            ForgotPasswordRequest(email: email.trimmingCharacters(in: .whitespacesAndNewlines))
+        )
+        let request = APIRequest(
+            path: "api/forgot-password",
+            method: .post,
+            body: body
+        )
+        return try await client.send(request, as: EmptyPayload.self)
+    }
 }

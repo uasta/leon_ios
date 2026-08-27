@@ -27,25 +27,48 @@ struct RecipeDetailView: View {
     var body: some View {
         Group {
             if isLoading && detail == nil {
-                ProgressView("正在加载食谱详情")
+                ProgressView(L10n.text(L10n.Recommend.detailLoading))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let detail {
                 List {
+                    if let coverURL = detail.coverURL, let url = URL(string: coverURL) {
+                        Section {
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                default:
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(.secondarySystemBackground))
+                                        .overlay {
+                                            ProgressView()
+                                        }
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 220)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        }
+                    }
+
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(effectiveRecipe.title)
                                 .font(.title3.weight(.semibold))
 
-                            Text(effectiveRecipe.matchReason ?? "适合当前阶段作为 1.0 的食谱详情承接。")
+                            Text(effectiveRecipe.matchReason ?? L10n.text(L10n.Recommend.detailReasonFallback))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
                         .padding(.vertical, 4)
                     }
 
-                    Section("操作入口") {
+                    Section(L10n.text(L10n.Recommend.detailActionsSection)) {
                         actionRow(
-                            title: "点赞",
+                            title: L10n.text(L10n.Recommend.detailLike),
                             systemImage: effectiveLiked ? "hand.thumbsup.fill" : "hand.thumbsup",
                             tint: .orange
                         ) {
@@ -53,43 +76,62 @@ struct RecipeDetailView: View {
                         }
 
                         actionRow(
-                            title: "收藏",
+                            title: L10n.text(L10n.Recommend.detailFavorite),
                             systemImage: effectiveFavorited ? "bookmark.fill" : "bookmark",
                             tint: .blue
                         ) {
                             await toggleFavorite()
                         }
 
-                        Text(sessionStore.isAuthenticated ? "点赞、收藏和浏览历史会同步沉淀到“我的”。" : "登录后可以把点赞、收藏、历史同步到“我的”。")
+                        Text(sessionStore.isAuthenticated
+                             ? L10n.text(L10n.Recommend.detailSyncHintAuthed)
+                             : L10n.text(L10n.Recommend.detailSyncHintGuest))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
 
-                    Section("食材") {
+                    Section(L10n.text(L10n.Recommend.detailIngredients)) {
                         ForEach(detail.ingredients, id: \.self) { item in
                             Text(item)
                         }
                     }
 
-                    Section("步骤") {
-                        ForEach(Array(detail.steps.enumerated()), id: \.offset) { index, step in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("步骤 \(index + 1)")
+                    Section(L10n.text(L10n.Recommend.detailSteps)) {
+                        ForEach(detail.steps) { step in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(L10n.Recommend.detailStep(step.index > 0 ? step.index : 1))
                                     .font(.subheadline.weight(.semibold))
-                                Text(step)
+
+                                if let imageURL = step.imageURL, let url = URL(string: imageURL) {
+                                    AsyncImage(url: url) { phase in
+                                        switch phase {
+                                        case .success(let image):
+                                            image
+                                                .resizable()
+                                                .scaledToFill()
+                                        default:
+                                            EmptyView()
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 180)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                }
+
+                                Text(step.text)
                                     .font(.body)
                             }
-                            .padding(.vertical, 2)
+                            .padding(.vertical, 4)
                         }
                     }
 
                     if let errorMessage {
-                        Section("服务状态") {
+                        Section(L10n.text(L10n.Recommend.detailServiceStatus)) {
                             Text(errorMessage)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
 
-                            Button("重试") {
+                            Button(L10n.text(L10n.Common.retry)) {
                                 Task {
                                     await loadDetail()
                                 }
@@ -100,13 +142,13 @@ struct RecipeDetailView: View {
                 .listStyle(.insetGrouped)
             } else {
                 ContentUnavailableView(
-                    "暂时拿不到详情",
+                    L10n.text(L10n.Recommend.detailUnavailableTitle),
                     systemImage: "fork.knife.circle",
-                    description: Text(errorMessage ?? "可以稍后重试，或者先继续浏览推荐列表。")
+                    description: Text(errorMessage ?? L10n.text(L10n.Recommend.detailUnavailableSubtitle))
                 )
             }
         }
-        .navigationTitle("食谱详情")
+        .navigationTitle(L10n.text(L10n.Recommend.detailTitle))
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await loadDetail()
@@ -243,11 +285,15 @@ struct RecipeDetailView: View {
             id: recipe.id,
             title: recipe.title,
             coverURL: recipe.coverURL,
-            ingredients: ["主食材待补齐", "辅料待补齐", "调味待补齐"],
+            ingredients: [
+                L10n.text(L10n.Recommend.fallbackIngredientMain),
+                L10n.text(L10n.Recommend.fallbackIngredientSide),
+                L10n.text(L10n.Recommend.fallbackIngredientSeasoning)
+            ],
             steps: [
-                "先根据当前推荐结果准备食材。",
-                "按家常做法完成预处理与下锅。",
-                "等后端详情接口进一步补全更完整的步骤。"
+                RecipeStep(index: 1, text: L10n.text(L10n.Recommend.fallbackStep1)),
+                RecipeStep(index: 2, text: L10n.text(L10n.Recommend.fallbackStep2)),
+                RecipeStep(index: 3, text: L10n.text(L10n.Recommend.fallbackStep3)),
             ],
             liked: recipe.liked,
             favorited: recipe.favorited

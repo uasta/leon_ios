@@ -22,10 +22,15 @@ final class PreferenceStore: ObservableObject {
         tabOrder.first == .recommend
     }
 
+    /// 同步给后端的 Tab 顺序。开拓暂未接入偏好接口，避免校验失败。
+    var syncableTabOrder: [AppTab] {
+        tabOrder.filter { $0 != .explore }
+    }
+
     func setPreferRecommendFirst(_ enabled: Bool) {
         let nextOrder: [AppTab] = enabled
-            ? [.recommend, .ingredients, .me]
-            : [.ingredients, .recommend, .me]
+            ? [.recommend, .explore, .ingredients, .me]
+            : AppTab.defaultOrder
         updateTabOrder(nextOrder)
     }
 
@@ -46,10 +51,11 @@ final class PreferenceStore: ObservableObject {
     }
 
     private static func normalizedOrder(from rawValue: [AppTab]) -> [AppTab] {
-        let primaryTabs = rawValue.filter { $0 != .me }
-        if primaryTabs.first == .recommend {
-            return [.recommend, .ingredients, .me]
+        let recommendIndex = rawValue.firstIndex(of: .recommend) ?? .max
+        let ingredientsIndex = rawValue.firstIndex(of: .ingredients) ?? .max
+        if recommendIndex < ingredientsIndex {
+            return [.recommend, .explore, .ingredients, .me]
         }
-        return [.ingredients, .recommend, .me]
+        return AppTab.defaultOrder
     }
 }

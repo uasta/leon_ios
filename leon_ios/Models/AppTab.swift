@@ -3,6 +3,7 @@ import Foundation
 enum AppTab: String, CaseIterable, Identifiable, Codable {
     case ingredients
     case recommend
+    case explore
     case me
 
     var id: String { rawValue }
@@ -10,11 +11,13 @@ enum AppTab: String, CaseIterable, Identifiable, Codable {
     var title: String {
         switch self {
         case .ingredients:
-            return "食材"
+            return L10n.text(L10n.Tab.ingredients)
         case .recommend:
-            return "推荐"
+            return L10n.text(L10n.Tab.recommend)
+        case .explore:
+            return L10n.text(L10n.Tab.explore)
         case .me:
-            return "我的"
+            return L10n.text(L10n.Tab.me)
         }
     }
 
@@ -24,10 +27,12 @@ enum AppTab: String, CaseIterable, Identifiable, Codable {
             return "carrot"
         case .recommend:
             return "fork.knife"
+        case .explore:
+            return "sparkles"
         case .me:
             return "person.crop.circle"
         }
     }
 
-    static let defaultOrder: [AppTab] = [.ingredients, .recommend, .me]
+    static let defaultOrder: [AppTab] = [.ingredients, .recommend, .explore, .me]
 }

@@ -20,14 +20,61 @@ actor RecommendationService {
         let recipes: [RecipeSummary]
     }
 
+    struct RecommendationFeedPage: Decodable {
+        let items: [RecipeSummary]
+        let page: Int
+        let limit: Int
+        let hasMore: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case items
+            case page
+            case limit
+            case hasMore = "has_more"
+        }
+
+        init(items: [RecipeSummary], page: Int, limit: Int, hasMore: Bool) {
+            self.items = items
+            self.page = page
+            self.limit = limit
+            self.hasMore = hasMore
+        }
+
+        init(from decoder: Decoder) throws {
+            if let keyed = try? decoder.container(keyedBy: CodingKeys.self),
+               let items = try? keyed.decode([RecipeSummary].self, forKey: .items) {
+                self.items = items
+                self.page = (try? keyed.decode(Int.self, forKey: .page)) ?? 1
+                self.limit = (try? keyed.decode(Int.self, forKey: .limit)) ?? items.count
+                self.hasMore = (try? keyed.decode(Bool.self, forKey: .hasMore)) ?? false
+                return
+            }
+
+            let legacyItems = try [RecipeSummary](from: decoder)
+            self.items = legacyItems
+            self.page = 1
+            self.limit = legacyItems.count
+            self.hasMore = false
+        }
+    }
+
     private let client: APIClient
 
     init(client: APIClient) {
         self.client = client
     }
 
-    func fetchRecommendationFeed() async throws -> APIEnvelope<[RecipeSummary]> {
-        try await client.send(APIRequest(path: "api/v1/recommendations/feed"), as: [RecipeSummary].self)
+    func fetchRecommendationFeed(page: Int = 1, limit: Int = 20) async throws -> APIEnvelope<RecommendationFeedPage> {
+        try await client.send(
+            APIRequest(
+                path: "api/v1/recommendations/feed",
+                queryItems: [
+                    URLQueryItem(name: "page", value: String(page)),
+                    URLQueryItem(name: "limit", value: String(limit)),
+                ]
+            ),
+            as: RecommendationFeedPage.self
+        )
     }
 
     func fetchHotSearches() async throws -> APIEnvelope<[HotSearchItem]> {

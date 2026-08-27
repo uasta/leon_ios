@@ -12,8 +12,18 @@ struct Ingredient: Identifiable, Hashable, Codable {
             switch self {
             case .fridgeChill: return "snowflake"
             case .fridgeFreeze: return "cube.transparent"
-            case .pantry: return "cabinet"
+            case .pantry: return "archivebox"
             case .other: return "tray"
+            }
+        }
+
+        /// UI 展示用；持久化仍用中文 `rawValue`，避免破坏已存数据。
+        var localizedTitle: String {
+            switch self {
+            case .fridgeChill: return L10n.text(L10n.Ingredients.locationFridgeChill)
+            case .fridgeFreeze: return L10n.text(L10n.Ingredients.locationFridgeFreeze)
+            case .pantry: return L10n.text(L10n.Ingredients.locationPantry)
+            case .other: return L10n.text(L10n.Ingredients.locationOther)
             }
         }
     }
@@ -62,7 +72,7 @@ struct IngredientSyncDraft: Hashable, Codable {
 }
 
 extension Ingredient {
-    enum Freshness: Comparable {
+    enum Freshness: Equatable, Comparable {
         case expired
         case expiringSoon(daysLeft: Int)
         case fresh

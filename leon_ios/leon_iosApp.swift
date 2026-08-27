@@ -12,6 +12,7 @@ struct leon_iosApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .tint(AppTheme.accent)
         }
     }
 }

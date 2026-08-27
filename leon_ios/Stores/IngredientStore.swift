@@ -26,6 +26,12 @@ final class IngredientStore: ObservableObject {
         persist()
     }
 
+    func addMany(_ ingredients: [Ingredient]) {
+        guard !ingredients.isEmpty else { return }
+        items.insert(contentsOf: ingredients, at: 0)
+        persist()
+    }
+
     func update(_ ingredient: Ingredient) {
         guard let idx = items.firstIndex(where: { $0.id == ingredient.id }) else { return }
         items[idx] = ingredient

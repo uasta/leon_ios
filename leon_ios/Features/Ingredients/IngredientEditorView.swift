@@ -21,7 +21,7 @@ struct IngredientEditorView: View {
         self.original = ingredient
         _name = State(initialValue: ingredient?.name ?? "")
         _quantity = State(initialValue: ingredient?.quantity ?? 1)
-        _unit = State(initialValue: ingredient?.unit ?? "份")
+        _unit = State(initialValue: ingredient?.unit ?? L10n.text(L10n.Action.unitPortion))
         _location = State(initialValue: ingredient?.location ?? .fridgeChill)
         _hasExpiry = State(initialValue: ingredient?.expiryDate != nil)
         _expiryDate = State(initialValue: ingredient?.expiryDate ?? Calendar.current.date(byAdding: .day, value: 3, to: Date()) ?? Date())
@@ -58,7 +58,7 @@ struct IngredientEditorView: View {
                             } label: {
                                 HStack(spacing: 6) {
                                     Image(systemName: "slider.horizontal.3")
-                                    Text("管理")
+                                    Text(L10n.text(L10n.Action.manage))
                                 }
                                 .font(.subheadline)
                                 .padding(.horizontal, 12)
@@ -70,17 +70,17 @@ struct IngredientEditorView: View {
                         .padding(.vertical, 4)
                     }
                 } header: {
-                    Text("常用")
+                    Text(L10n.text(L10n.Ingredients.presetsHeader))
                 } footer: {
-                    Text("点选预设可快速填充名称/单位/位置，并可带默认到期天数与标签。")
+                    Text(L10n.text(L10n.Ingredients.presetsFooter))
                 }
 
                 Section {
-                    TextField("名称", text: $name)
+                    TextField(L10n.text(L10n.Action.name), text: $name)
                         .textInputAutocapitalization(.never)
 
                     HStack {
-                        Text("数量")
+                        Text(L10n.text(L10n.Action.quantity))
                         Spacer()
                         TextField("1", value: $quantity, format: .number)
                             .keyboardType(.decimalPad)
@@ -88,40 +88,40 @@ struct IngredientEditorView: View {
                             .frame(maxWidth: 120)
                     }
 
-                    TextField("单位（如：个/份/kg）", text: $unit)
+                    TextField(L10n.text(L10n.Ingredients.unitPrompt), text: $unit)
 
-                    Picker("位置", selection: $location) {
+                    Picker(L10n.text(L10n.Action.location), selection: $location) {
                         ForEach(Ingredient.Location.allCases) { loc in
-                            Label(loc.rawValue, systemImage: loc.systemImage)
+                            Label(loc.localizedTitle, systemImage: loc.systemImage)
                                 .tag(loc)
                         }
                     }
                 }
 
-                Section("到期提醒") {
-                    Toggle("设置到期日", isOn: $hasExpiry.animation(.default))
+                Section(L10n.text(L10n.Ingredients.expirySection)) {
+                    Toggle(L10n.text(L10n.Ingredients.setExpiry), isOn: $hasExpiry.animation(.default))
                     if hasExpiry {
-                        DatePicker("到期日", selection: $expiryDate, displayedComponents: .date)
+                        DatePicker(L10n.text(L10n.Ingredients.expiryDate), selection: $expiryDate, displayedComponents: .date)
                     }
                 }
 
-                Section("标签") {
-                    TextField("用空格分隔（如：蔬菜 肉类）", text: $tagsText)
+                Section(L10n.text(L10n.Action.tags)) {
+                    TextField(L10n.text(L10n.Ingredients.tagsPrompt), text: $tagsText)
                 }
 
-                Section("备注") {
-                    TextField("可选", text: $note, axis: .vertical)
+                Section(L10n.text(L10n.Action.note)) {
+                    TextField(L10n.text(L10n.Action.optional), text: $note, axis: .vertical)
                         .lineLimit(2...6)
                 }
             }
-            .navigationTitle(original == nil ? "新增食材" : "编辑食材")
+            .navigationTitle(original == nil ? L10n.text(L10n.Ingredients.editorTitleNew) : L10n.text(L10n.Ingredients.editorTitleEdit))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button(L10n.text(L10n.Common.cancel)) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { saveAndDismiss() }
+                    Button(L10n.text(L10n.Action.save)) { saveAndDismiss() }
                         .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
@@ -130,6 +130,8 @@ struct IngredientEditorView: View {
                     .environmentObject(presetStore)
             }
         }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
 
     private func saveAndDismiss() {
@@ -143,7 +145,7 @@ struct IngredientEditorView: View {
             id: original?.id ?? UUID(),
             name: cleanedName,
             quantity: quantity <= 0 ? nil : quantity,
-            unit: unit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "份" : unit,
+            unit: unit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? L10n.text(L10n.Action.unitPortion) : unit,
             location: location,
             purchaseDate: original?.purchaseDate,
             expiryDate: hasExpiry ? expiryDate : nil,

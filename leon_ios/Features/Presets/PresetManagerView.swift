@@ -23,7 +23,7 @@ struct PresetManagerView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(preset.name)
                                     .font(.headline)
-                                Text("\(preset.defaultLocation.rawValue) · \(preset.defaultUnit)")
+                                Text("\(preset.defaultLocation.localizedTitle) · \(preset.defaultUnit)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -39,11 +39,11 @@ struct PresetManagerView: View {
                     }
                 }
             }
-            .navigationTitle("管理预设")
+            .navigationTitle(L10n.text(L10n.Presets.managerTitle))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
+                    Button(L10n.text(L10n.Common.close)) { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     EditButton()
@@ -55,7 +55,7 @@ struct PresetManagerView: View {
                     } label: {
                         Image(systemName: "plus")
                     }
-                    .accessibilityLabel("新增预设")
+                    .accessibilityLabel(L10n.text(L10n.Presets.managerAddA11y))
                 }
             }
             .sheet(isPresented: $showEditor) {

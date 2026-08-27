@@ -2,12 +2,21 @@ import SwiftUI
 
 struct RecommendHomeView: View {
     private enum DiscoverChannel: String, CaseIterable, Identifiable {
-        case all = "全部"
-        case quick = "快手"
-        case home = "家常"
-        case stock = "清库存"
+        case all
+        case quick
+        case home
+        case stock
 
         var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .all: return L10n.text(L10n.Recommend.channelAll)
+            case .quick: return L10n.text(L10n.Recommend.channelQuick)
+            case .home: return L10n.text(L10n.Recommend.channelHome)
+            case .stock: return L10n.text(L10n.Recommend.channelStock)
+            }
+        }
     }
 
     @EnvironmentObject private var store: RecommendationStore
@@ -60,11 +69,11 @@ struct RecommendHomeView: View {
                 .padding(.vertical, 12)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("推荐")
+            .navigationTitle(L10n.text(L10n.Recommend.homeTitle))
             .navigationDestination(for: RecipeSummary.self) { recipe in
                 RecipeDetailView(recipe: recipe)
             }
-            .searchable(text: $store.query, isPresented: $isSearchPresented, prompt: "搜索菜谱")
+            .searchable(text: $store.query, isPresented: $isSearchPresented, prompt: L10n.text(L10n.Recommend.searchPrompt))
             .onSubmit(of: .search) {
                 Task {
                     await store.searchRecipes()
@@ -95,11 +104,14 @@ struct RecommendHomeView: View {
 
     private var contextSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("当前食材上下文", actionTitle: "清除") {
+            sectionHeader(L10n.text(L10n.Recommend.contextTitle), actionTitle: L10n.text(L10n.Action.clear)) {
                 store.clearSelectedIngredientNames()
             }
 
-            Text("已带入 \(store.selectedIngredientNames.count) 个食材：\(store.selectedIngredientNames.joined(separator: "、"))")
+            Text(L10n.Recommend.contextBroughtIn(
+                store.selectedIngredientNames.count,
+                store.selectedIngredientNames.joined(separator: "、")
+            ))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .padding(14)
@@ -112,9 +124,11 @@ struct RecommendHomeView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("今天吃点什么")
+                    Text(L10n.text(L10n.Recommend.heroTitle))
                         .font(.system(size: 28, weight: .bold, design: .rounded))
-                    Text(store.selectedIngredientNames.isEmpty ? "按你当前的收藏偏好、家常灵感和热门菜谱，整理成更适合快速浏览的发现流。" : "已经把你勾选的食材带进来了，先从更接近可开做的方向帮你铺开。")
+                    Text(store.selectedIngredientNames.isEmpty
+                         ? L10n.text(L10n.Recommend.heroSubtitleDefault)
+                         : L10n.text(L10n.Recommend.heroSubtitleWithIngredients))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -134,9 +148,9 @@ struct RecommendHomeView: View {
             }
 
             HStack(spacing: 10) {
-                heroMetricCard(title: "今日推荐", value: "\(store.feed.count)", accent: Color(red: 0.94, green: 0.43, blue: 0.34))
-                heroMetricCard(title: "热门词", value: "\(store.hotSearches.count)", accent: Color(red: 0.33, green: 0.62, blue: 0.84))
-                heroMetricCard(title: "最近搜索", value: "\(store.searchHistory.count)", accent: Color(red: 0.36, green: 0.66, blue: 0.47))
+                heroMetricCard(title: L10n.text(L10n.Recommend.heroMetricToday), value: "\(store.feed.count)", accent: Color(red: 0.94, green: 0.43, blue: 0.34))
+                heroMetricCard(title: L10n.text(L10n.Recommend.heroMetricHot), value: "\(store.hotSearches.count)", accent: Color(red: 0.33, green: 0.62, blue: 0.84))
+                heroMetricCard(title: L10n.text(L10n.Recommend.heroMetricRecent), value: "\(store.searchHistory.count)", accent: Color(red: 0.36, green: 0.66, blue: 0.47))
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -173,7 +187,7 @@ struct RecommendHomeView: View {
     private var discoverChannelSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("发现频道")
+                Text(L10n.text(L10n.Recommend.channelSection))
                     .font(.headline)
                 Spacer()
                 Text(channelSubtitle)
@@ -187,7 +201,7 @@ struct RecommendHomeView: View {
                         Button {
                             selectedChannel = channel
                         } label: {
-                            Text(channel.rawValue)
+                            Text(channel.title)
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(selectedChannel == channel ? .white : .primary)
                                 .padding(.horizontal, 14)
@@ -209,19 +223,27 @@ struct RecommendHomeView: View {
 
     private var recommendationSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(store.selectedIngredientNames.isEmpty ? "发现菜谱" : "按食材推荐")
+            sectionHeader(store.selectedIngredientNames.isEmpty
+                          ? L10n.text(L10n.Recommend.feedTitle)
+                          : L10n.text(L10n.Recommend.feedTitleByIngredients))
 
             if store.isLoading && store.feed.isEmpty {
-                ProgressView("正在准备推荐")
+                ProgressView(L10n.text(L10n.Recommend.feedLoading))
                     .frame(maxWidth: .infinity, minHeight: 160)
             } else if displayedFeed.isEmpty {
                 ContentUnavailableView(
-                    "还没有推荐结果",
+                    L10n.text(L10n.Recommend.feedEmptyTitle),
                     systemImage: "fork.knife",
-                    description: Text("可以先从食材页带入几个食材，或者直接搜索菜谱。")
+                    description: Text(L10n.text(L10n.Recommend.feedEmptySubtitle))
                 )
             } else {
                 waterfallGrid(displayedFeed)
+
+                if store.isLoadingMore {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                }
             }
         }
     }
@@ -242,8 +264,8 @@ struct RecommendHomeView: View {
         VStack(alignment: .leading, spacing: 16) {
             if !store.searchHistory.isEmpty {
                 searchKeywordSection(
-                    title: "最近搜索",
-                    actionTitle: "清空"
+                    title: L10n.text(L10n.Recommend.searchRecent),
+                    actionTitle: L10n.text(L10n.Action.clearAll)
                 ) {
                     store.clearSearchHistory()
                 } content: {
@@ -251,7 +273,7 @@ struct RecommendHomeView: View {
                 }
             }
 
-            searchKeywordSection(title: "热门搜索") {
+            searchKeywordSection(title: L10n.text(L10n.Recommend.searchHot)) {
                 keywordChips(store.hotSearches)
             }
         }
@@ -259,24 +281,24 @@ struct RecommendHomeView: View {
 
     private var searchSuggestionSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("搜索建议", actionTitle: "搜索") {
+            sectionHeader(L10n.text(L10n.Recommend.searchSuggestionsTitle), actionTitle: L10n.text(L10n.Action.search)) {
                 Task {
                     await store.searchRecipes()
                 }
             }
 
-            Text("输入“\(trimmedQuery)”后，可直接点建议词或继续回车搜索。")
+            Text(L10n.Recommend.searchSuggestionsHint(trimmedQuery))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
             if store.isFetchingSuggestions && store.searchSuggestions.isEmpty {
-                ProgressView("正在整理建议")
+                ProgressView(L10n.text(L10n.Recommend.searchSuggestionsLoading))
                     .frame(maxWidth: .infinity, minHeight: 120)
             } else if store.searchSuggestions.isEmpty {
                 ContentUnavailableView(
-                    "还没有合适的建议词",
+                    L10n.text(L10n.Recommend.searchSuggestionsEmptyTitle),
                     systemImage: "text.magnifyingglass",
-                    description: Text("可以直接点右上角搜索，也可以换个关键词试试。")
+                    description: Text(L10n.text(L10n.Recommend.searchSuggestionsEmptySubtitle))
                 )
             } else {
                 suggestionList(store.searchSuggestions)
@@ -286,18 +308,18 @@ struct RecommendHomeView: View {
 
     private var committedSearchSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("搜索结果", actionTitle: "重新搜索") {
+            sectionHeader(L10n.text(L10n.Recommend.searchResultsTitle), actionTitle: L10n.text(L10n.Recommend.searchRetry)) {
                 Task {
                     await store.retrySearch()
                 }
             }
 
-            Text("关键词：\(trimmedQuery)")
+            Text(L10n.Recommend.searchKeyword(trimmedQuery))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
             if store.isSearching && store.searchResults.isEmpty {
-                ProgressView("正在搜索菜谱")
+                ProgressView(L10n.text(L10n.Recommend.searchLoading))
                     .frame(maxWidth: .infinity, minHeight: 160)
             } else if let errorMessage = store.searchErrorMessage {
                 Text(errorMessage)
@@ -308,12 +330,12 @@ struct RecommendHomeView: View {
                     .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
             } else if store.searchResults.isEmpty {
                 ContentUnavailableView(
-                    "没有找到结果",
+                    L10n.text(L10n.Recommend.searchEmptyTitle),
                     systemImage: "magnifyingglass",
-                    description: Text("换个关键词试试，或者先点搜索建议继续找。")
+                    description: Text(L10n.text(L10n.Recommend.searchEmptySubtitle))
                 )
             } else {
-                Text("共 \(store.searchResults.count) 条结果")
+                Text(L10n.Recommend.searchResultCount(store.searchResults.count))
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -334,6 +356,11 @@ struct RecommendHomeView: View {
                             RecipeCard(recipe: recipe)
                         }
                         .buttonStyle(.plain)
+                        .onAppear {
+                            Task {
+                                await store.loadMoreFeedIfNeeded(currentRecipeID: recipe.id)
+                            }
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
@@ -477,13 +504,13 @@ struct RecommendHomeView: View {
     private var channelSubtitle: String {
         switch selectedChannel {
         case .all:
-            return "按灵感浏览"
+            return L10n.text(L10n.Recommend.channelSubtitleAll)
         case .quick:
-            return "更适合今天快做"
+            return L10n.text(L10n.Recommend.channelSubtitleQuick)
         case .home:
-            return "偏家常稳妥路线"
+            return L10n.text(L10n.Recommend.channelSubtitleHome)
         case .stock:
-            return "优先考虑消耗现有食材"
+            return L10n.text(L10n.Recommend.channelSubtitleStock)
         }
     }
 }
@@ -493,41 +520,9 @@ private struct RecipeCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            RoundedRectangle(cornerRadius: 14)
-                .fill(cardGradient)
+            bannerView
                 .frame(height: bannerHeight)
-                .overlay(alignment: .bottomLeading) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(cardBadgeText)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(.black.opacity(0.18), in: Capsule())
-
-                        HStack(spacing: 8) {
-                            ForEach(cardTags, id: \.self) { tag in
-                                Text(tag)
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 5)
-                                    .background(.white.opacity(0.16), in: Capsule())
-                            }
-                        }
-                    }
-                    .padding(10)
-                }
-                .overlay(alignment: .topTrailing) {
-                    VStack(alignment: .trailing, spacing: 6) {
-                        Image(systemName: recipe.favorited ? "bookmark.fill" : "sparkles")
-                            .font(.caption.weight(.semibold))
-                        Text(displayHeat)
-                            .font(.caption2.weight(.medium))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(10)
-                }
+                .clipShape(RoundedRectangle(cornerRadius: 14))
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(recipe.title)
@@ -535,7 +530,7 @@ private struct RecipeCard: View {
                     .foregroundStyle(.primary)
                     .lineLimit(3)
 
-                Text(recipe.matchReason ?? "等待真实推荐理由")
+                Text(recipe.matchReason ?? L10n.text(L10n.Recommend.cardReasonPlaceholder))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(4)
@@ -575,16 +570,78 @@ private struct RecipeCard: View {
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
     }
 
+    private var bannerView: some View {
+        ZStack {
+            if let coverURL = recipe.coverURL, let url = URL(string: coverURL) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        cardGradientFill
+                    default:
+                        cardGradientFill
+                            .overlay {
+                                ProgressView()
+                                    .tint(.white)
+                            }
+                    }
+                }
+            } else {
+                cardGradientFill
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(cardBadgeText)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.18), in: Capsule())
+
+                HStack(spacing: 8) {
+                    ForEach(cardTags, id: \.self) { tag in
+                        Text(tag)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(.white.opacity(0.16), in: Capsule())
+                    }
+                }
+            }
+            .padding(10)
+        }
+        .overlay(alignment: .topTrailing) {
+            VStack(alignment: .trailing, spacing: 6) {
+                Image(systemName: recipe.favorited ? "bookmark.fill" : "sparkles")
+                    .font(.caption.weight(.semibold))
+                Text(displayHeat)
+                    .font(.caption2.weight(.medium))
+            }
+            .foregroundStyle(.white)
+            .padding(10)
+        }
+    }
+
+    private var cardGradientFill: some View {
+        Rectangle()
+            .fill(cardGradient)
+    }
+
     private var cardBadgeText: String {
         if recipe.favorited {
-            return "已收藏"
+            return L10n.text(L10n.Recommend.cardBadgeFavorited)
         }
 
         if recipe.liked {
-            return "高匹配"
+            return L10n.text(L10n.Recommend.cardBadgeHighMatch)
         }
 
-        return "家常推荐"
+        return L10n.text(L10n.Recommend.cardBadgeHome)
     }
 
     private var cardGradient: LinearGradient {
@@ -608,18 +665,21 @@ private struct RecipeCard: View {
 
         if let reason = recipe.matchReason {
             if reason.contains("快手") || reason.contains("10") || reason.contains("15") {
-                tags.append("快做")
+                tags.append(L10n.text(L10n.Recommend.cardTagQuick))
             }
             if reason.contains("家常") || reason.contains("下饭") {
-                tags.append("家常")
+                tags.append(L10n.text(L10n.Recommend.cardTagHome))
             }
             if reason.contains("食材") || reason.contains("匹配") {
-                tags.append("食材向")
+                tags.append(L10n.text(L10n.Recommend.cardTagIngredient))
             }
         }
 
         if tags.isEmpty {
-            tags = ["灵感菜谱", "今晚可做"]
+            tags = [
+                L10n.text(L10n.Recommend.cardTagInspiration),
+                L10n.text(L10n.Recommend.cardTagTonight)
+            ]
         }
 
         return Array(tags.prefix(2))
@@ -630,11 +690,16 @@ private struct RecipeCard: View {
     }
 
     private var displayHeat: String {
-        "热度 \(70 + recipe.id % 29)"
+        L10n.Recommend.cardHeat(70 + recipe.id % 29)
     }
 
     private var authorName: String {
-        let names = ["Leon 厨房", "晚餐灵感", "清库存研究所", "今日下饭局"]
+        let names = [
+            L10n.text(L10n.Recommend.authorKitchen),
+            L10n.text(L10n.Recommend.authorDinner),
+            L10n.text(L10n.Recommend.authorStock),
+            L10n.text(L10n.Recommend.authorToday)
+        ]
         return names[recipe.id % names.count]
     }
 
@@ -645,12 +710,12 @@ private struct RecipeCard: View {
 
     private var channelText: String {
         if recipe.liked {
-            return "优先匹配"
+            return L10n.text(L10n.Recommend.cardChannelPriority)
         }
         if recipe.favorited {
-            return "收藏偏好"
+            return L10n.text(L10n.Recommend.cardChannelFavorite)
         }
-        return "发现流"
+        return L10n.text(L10n.Recommend.cardChannelDiscover)
     }
 
     private var avatarGradient: LinearGradient {

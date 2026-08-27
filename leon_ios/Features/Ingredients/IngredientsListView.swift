@@ -2,12 +2,15 @@ import SwiftUI
 
 struct IngredientsListView: View {
     @EnvironmentObject private var store: IngredientStore
+    @EnvironmentObject private var presetStore: IngredientPresetStore
     @EnvironmentObject private var recommendationStore: RecommendationStore
     @EnvironmentObject private var navigationStore: AppNavigationStore
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.editMode) private var editMode
 
     @State private var query: String = ""
     @State private var showEditor: Bool = false
+    @State private var showOCRImport: Bool = false
     @State private var editingIngredient: Ingredient? = nil
     @State private var showArchived: Bool = false
     @State private var showFilterSheet: Bool = false
@@ -26,10 +29,11 @@ struct IngredientsListView: View {
                 return $0.name.localizedCaseInsensitiveContains(query)
                     || $0.tags.joined(separator: " ").localizedCaseInsensitiveContains(query)
                     || $0.location.rawValue.localizedCaseInsensitiveContains(query)
+                    || $0.location.localizedTitle.localizedCaseInsensitiveContains(query)
             }
     }
 
-    private var grouped: [(title: String, items: [Ingredient])] {
+    private var grouped: [(kind: IngredientGroupKind, items: [Ingredient])] {
         let expiring = visibleItems.filter {
             if case .expiringSoon = $0.freshness { return true }
             return false
@@ -38,11 +42,11 @@ struct IngredientsListView: View {
         let fresh = visibleItems.filter { $0.freshness == .fresh }
         let noExpiry = visibleItems.filter { $0.freshness == .noExpiry }
 
-        var result: [(String, [Ingredient])] = []
-        if !expiring.isEmpty { result.append(("临期", expiring)) }
-        if !fresh.isEmpty { result.append(("新鲜", fresh)) }
-        if !noExpiry.isEmpty { result.append(("无到期日", noExpiry)) }
-        if !expired.isEmpty { result.append(("已过期", expired)) }
+        var result: [(IngredientGroupKind, [Ingredient])] = []
+        if !expiring.isEmpty { result.append((.expiring, expiring)) }
+        if !fresh.isEmpty { result.append((.fresh, fresh)) }
+        if !noExpiry.isEmpty { result.append((.noExpiry, noExpiry)) }
+        if !expired.isEmpty { result.append((.expired, expired)) }
         return result
     }
 
@@ -63,33 +67,37 @@ struct IngredientsListView: View {
         NavigationStack {
             Group {
                 if visibleItems.isEmpty {
-                    ContentUnavailableView(
-                        "还没有食材",
-                        systemImage: "carrot",
-                        description: Text("先添加几个常用食材，后面就能直接带着食材去推荐。")
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    emptyState
                 } else {
-                    List(selection: $selectedIDs) {
-                        ForEach(grouped, id: \.title) { section in
-                            Section(section.title) {
-                                ForEach(section.items) { item in
-                                    row(item)
-                                }
-                            }
-                        }
-                    }
-                    .listStyle(.insetGrouped)
+                    ingredientList
                 }
             }
-            .navigationTitle("我的食材")
+            .appScreenBackground()
+            .navigationTitle(L10n.text(L10n.Ingredients.listTitle))
+            .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: Ingredient.self) { ingredient in
                 IngredientDetailView(ingredientID: ingredient.id)
             }
-            .searchable(text: $query, prompt: "搜索名称/标签/位置")
+            .searchable(text: $query, prompt: L10n.text(L10n.Ingredients.searchPrompt))
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    EditButton()
+                    Menu {
+                        Button {
+                            editingIngredient = nil
+                            showEditor = true
+                        } label: {
+                            Label(L10n.text(L10n.OCR.entryManual), systemImage: "square.and.pencil")
+                        }
+
+                        Button {
+                            showOCRImport = true
+                        } label: {
+                            Label(L10n.text(L10n.OCR.entryReceipt), systemImage: "doc.viewfinder")
+                        }
+                    } label: {
+                        Text(L10n.text(L10n.Action.add))
+                            .font(.subheadline.weight(.semibold))
+                    }
                 }
 
                 ToolbarItem(placement: .topBarLeading) {
@@ -98,7 +106,11 @@ struct IngredientsListView: View {
                     } label: {
                         Image(systemName: hasActiveFilter ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                     }
-                    .accessibilityLabel("筛选")
+                    .accessibilityLabel(L10n.text(L10n.Action.filter))
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    EditButton()
                 }
             }
             .toolbar {
@@ -108,7 +120,7 @@ struct IngredientsListView: View {
                             selectedIDs.forEach { store.archive($0) }
                             selectedIDs.removeAll()
                         } label: {
-                            Label("用掉", systemImage: "checkmark.circle")
+                            Label(L10n.text(L10n.Action.markUsed), systemImage: "checkmark.circle")
                         }
 
                         Spacer()
@@ -116,7 +128,7 @@ struct IngredientsListView: View {
                         Button {
                             selectedIDs.forEach { store.postponeExpiry($0, days: 1) }
                         } label: {
-                            Label("延期1天", systemImage: "calendar.badge.plus")
+                            Label(L10n.text(L10n.Ingredients.postpone1d), systemImage: "calendar.badge.plus")
                         }
 
                         Spacer()
@@ -130,7 +142,7 @@ struct IngredientsListView: View {
                             editMode?.wrappedValue = .inactive
                             selectedIDs.removeAll()
                         } label: {
-                            Label("去推荐", systemImage: "arrow.right.circle")
+                            Label(L10n.text(L10n.Ingredients.goRecommend), systemImage: "arrow.right.circle")
                         }
 
                         Spacer()
@@ -139,18 +151,31 @@ struct IngredientsListView: View {
                             selectedIDs.forEach { store.delete($0) }
                             selectedIDs.removeAll()
                         } label: {
-                            Label("删除", systemImage: "trash")
+                            Label(L10n.text(L10n.Action.delete), systemImage: "trash")
                         }
                     }
                 }
             }
-            .overlay(alignment: .bottomTrailing) {
-                if !isSelecting {
-                    addFloatingButton
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !isSelecting && !visibleItems.isEmpty {
+                    HStack {
+                        Spacer()
+                        addMenu {
+                            AppFloatingActionButtonLabel()
+                        }
+                    }
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 12)
                 }
             }
             .sheet(isPresented: $showEditor) {
                 IngredientEditorView(ingredient: editingIngredient)
+                    .environmentObject(store)
+                    .environmentObject(presetStore)
+            }
+            .sheet(isPresented: $showOCRImport) {
+                ReceiptOCRImportView()
+                    .environmentObject(store)
             }
             .sheet(isPresented: $showFilterSheet) {
                 IngredientFilterSheet(
@@ -161,6 +186,7 @@ struct IngredientsListView: View {
                     allTags: allTags
                 )
                 .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
             }
             .onChange(of: isSelecting) { _, newValue in
                 if !newValue { selectedIDs.removeAll() }
@@ -168,9 +194,100 @@ struct IngredientsListView: View {
         }
     }
 
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            AppListSubtitle(text: L10n.text(L10n.Ingredients.listSubtitle))
+            ContentUnavailableView(
+                L10n.text(L10n.Ingredients.emptyTitle),
+                systemImage: "carrot",
+                description: Text(L10n.text(L10n.Ingredients.emptySubtitle))
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            VStack(spacing: 10) {
+                Button {
+                    editingIngredient = nil
+                    showEditor = true
+                } label: {
+                    Text(L10n.text(L10n.OCR.entryManual))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    showOCRImport = true
+                } label: {
+                    Text(L10n.text(L10n.OCR.entryReceipt))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
+        }
+    }
+
+    private func addMenu<MenuLabel: View>(@ViewBuilder label: () -> MenuLabel) -> some View {
+        Menu {
+            Button {
+                editingIngredient = nil
+                showEditor = true
+            } label: {
+                Label(L10n.text(L10n.OCR.entryManual), systemImage: "square.and.pencil")
+            }
+
+            Button {
+                showOCRImport = true
+            } label: {
+                Label(L10n.text(L10n.OCR.entryReceipt), systemImage: "doc.viewfinder")
+            }
+        } label: {
+            label()
+        }
+    }
+
+    private var ingredientList: some View {
+        VStack(spacing: 0) {
+            AppListSubtitle(text: L10n.text(L10n.Ingredients.listSubtitle))
+
+            Group {
+                if isSelecting {
+                    List(selection: $selectedIDs) {
+                        ingredientSections(selectionEnabled: true)
+                    }
+                } else {
+                    List {
+                        ingredientSections(selectionEnabled: false)
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+        }
+    }
+
     @ViewBuilder
-    private func row(_ item: Ingredient) -> some View {
-        if isSelecting {
+    private func ingredientSections(selectionEnabled: Bool) -> some View {
+        ForEach(grouped, id: \.kind) { section in
+            Section {
+                ForEach(section.items) { item in
+                    row(item, selectionEnabled: selectionEnabled)
+                        .listRowBackground(
+                            AppTheme.sectionBackground(for: section.kind.themeKind, scheme: colorScheme)
+                        )
+                }
+            } header: {
+                Text(section.kind.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.sectionLabelColor(for: section.kind.themeKind))
+                    .textCase(nil)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ item: Ingredient, selectionEnabled: Bool) -> some View {
+        if selectionEnabled {
             IngredientRow(item: item)
                 .tag(item.id)
         } else {
@@ -181,50 +298,33 @@ struct IngredientsListView: View {
                 Button {
                     store.archive(item.id)
                 } label: {
-                    Label("用掉", systemImage: "checkmark.circle.fill")
+                    Label(L10n.text(L10n.Action.markUsed), systemImage: "checkmark.circle.fill")
                 }
                 .tint(.green)
 
                 Button(role: .destructive) {
                     store.delete(item.id)
                 } label: {
-                    Label("丢弃", systemImage: "trash.fill")
+                    Label(L10n.text(L10n.Ingredients.discard), systemImage: "trash.fill")
                 }
             }
             .swipeActions(edge: .leading, allowsFullSwipe: false) {
                 Button {
                     store.postponeExpiry(item.id, days: 1)
                 } label: {
-                    Label("延期 1 天", systemImage: "calendar.badge.plus")
+                    Label(L10n.text(L10n.Ingredients.postpone1d), systemImage: "calendar.badge.plus")
                 }
-                .tint(.blue)
+                .tint(AppTheme.accent)
 
                 Button {
                     editingIngredient = item
                     showEditor = true
                 } label: {
-                    Label("编辑", systemImage: "pencil")
+                    Label(L10n.text(L10n.Action.edit), systemImage: "pencil")
                 }
                 .tint(.gray)
             }
         }
-    }
-
-    private var addFloatingButton: some View {
-        Button {
-            editingIngredient = nil
-            showEditor = true
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 52, height: 52)
-                .background(.tint, in: Circle())
-                .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 6)
-        }
-        .padding(.trailing, 18)
-        .padding(.bottom, 18)
-        .accessibilityLabel("新增食材")
     }
 
     private func matchesFilter(_ item: Ingredient) -> Bool {
@@ -251,54 +351,38 @@ private struct IngredientRow: View {
     let item: Ingredient
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: item.location.systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 22)
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(AppTheme.accentSoft)
+                    .frame(width: 36, height: 36)
 
-            VStack(alignment: .leading, spacing: 4) {
+                Image(systemName: item.location.systemImage)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
                 Text(item.name)
-                    .font(.headline)
+                    .font(.body.weight(.semibold))
 
                 HStack(spacing: 8) {
-                    Text(item.location.rawValue)
+                    Text(item.location.localizedTitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    freshnessPill
+                    FreshnessBadge(freshness: item.freshness)
                 }
             }
 
             Spacer(minLength: 12)
 
             Text(item.quantityText)
-                .font(.subheadline)
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)
         }
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
-    }
-
-    @ViewBuilder
-    private var freshnessPill: some View {
-        switch item.freshness {
-        case .expired:
-            Label("过期", systemImage: "exclamationmark.triangle.fill")
-                .labelStyle(.titleOnly)
-                .font(.caption)
-                .foregroundStyle(.red)
-        case .expiringSoon(let daysLeft):
-            Text(daysLeft == 0 ? "今天到期" : "剩 \(daysLeft) 天")
-                .font(.caption)
-                .foregroundStyle(.orange)
-        case .fresh:
-            Text("新鲜")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        case .noExpiry:
-            Text("不提醒")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
     }
 }
 
@@ -306,15 +390,51 @@ private struct IngredientRow: View {
     IngredientsListView()
         .environmentObject(IngredientStore())
         .environmentObject(IngredientPresetStore())
+        .environmentObject(RecommendationStore())
+        .environmentObject(AppNavigationStore())
+        .environmentObject(SessionStore())
+}
+
+private enum IngredientGroupKind: String, Hashable {
+    case expiring
+    case fresh
+    case noExpiry
+    case expired
+
+    var title: String {
+        switch self {
+        case .expiring: return L10n.text(L10n.Ingredients.statusExpiring)
+        case .fresh: return L10n.text(L10n.Ingredients.statusFresh)
+        case .noExpiry: return L10n.text(L10n.Ingredients.statusNoExpiry)
+        case .expired: return L10n.text(L10n.Ingredients.statusExpired)
+        }
+    }
+
+    var themeKind: AppTheme.InventorySectionKind {
+        switch self {
+        case .expiring: return .expiring
+        case .expired: return .expired
+        case .fresh, .noExpiry: return .standard
+        }
+    }
 }
 
 private enum IngredientStatusFilter: String, CaseIterable, Identifiable, Hashable {
-    case expiringSoon = "临期"
-    case fresh = "新鲜"
-    case noExpiry = "无到期日"
-    case expired = "已过期"
+    case expiringSoon
+    case fresh
+    case noExpiry
+    case expired
 
     var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .expiringSoon: return L10n.text(L10n.Ingredients.statusExpiring)
+        case .fresh: return L10n.text(L10n.Ingredients.statusFresh)
+        case .noExpiry: return L10n.text(L10n.Ingredients.statusNoExpiry)
+        case .expired: return L10n.text(L10n.Ingredients.statusExpired)
+        }
+    }
 
     init?(from freshness: Ingredient.Freshness) {
         switch freshness {
@@ -344,28 +464,28 @@ private struct IngredientFilterSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Toggle("显示已归档", isOn: $showArchived)
+                    Toggle(L10n.text(L10n.Ingredients.filterShowArchived), isOn: $showArchived)
                 }
 
-                Section("位置") {
+                Section(L10n.text(L10n.Action.location)) {
                     ForEach(Ingredient.Location.allCases) { loc in
                         Toggle(isOn: binding(for: loc)) {
-                            Label(loc.rawValue, systemImage: loc.systemImage)
+                            Label(loc.localizedTitle, systemImage: loc.systemImage)
                         }
                     }
                 }
 
-                Section("状态") {
+                Section(L10n.text(L10n.Action.status)) {
                     ForEach(IngredientStatusFilter.allCases) { status in
                         Toggle(isOn: binding(for: status)) {
-                            Text(status.rawValue)
+                            Text(status.title)
                         }
                     }
                 }
 
-                Section("标签") {
+                Section(L10n.text(L10n.Action.tags)) {
                     if allTags.isEmpty {
-                        Text("暂无标签")
+                        Text(L10n.text(L10n.Ingredients.filterNoTags))
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(allTags, id: \.self) { tag in
@@ -377,7 +497,7 @@ private struct IngredientFilterSheet: View {
                 }
 
                 Section {
-                    Button("清除筛选") {
+                    Button(L10n.text(L10n.Ingredients.filterClear), role: .destructive) {
                         selectedLocations.removeAll()
                         selectedStatuses.removeAll()
                         selectedTags.removeAll()
@@ -385,11 +505,12 @@ private struct IngredientFilterSheet: View {
                     }
                 }
             }
-            .navigationTitle("筛选")
+            .navigationTitle(L10n.text(L10n.Ingredients.filterTitle))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
+                    Button(L10n.text(L10n.Action.done)) { dismiss() }
+                        .fontWeight(.semibold)
                 }
             }
         }
