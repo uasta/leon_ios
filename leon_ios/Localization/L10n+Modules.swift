@@ -179,6 +179,7 @@ extension L10n {
             L10n.format("recommend.hero.subtitle_flavors", flavors)
         }
         static let heroRefresh = LocalizedStringResource("recommend.hero.refresh", defaultValue: "换一批")
+        static let scrollToTop = LocalizedStringResource("recommend.scroll_to_top", defaultValue: "回到顶部")
         static let dailyBadge = LocalizedStringResource("recommend.daily.badge", defaultValue: "今日推荐")
         static let heroMetricToday = LocalizedStringResource("recommend.hero.metric_today", defaultValue: "今日推荐")
         static let heroMetricHot = LocalizedStringResource("recommend.hero.metric_hot", defaultValue: "热门词")

@@ -4844,6 +4844,23 @@
         }
       }
     },
+    "recommend.scroll_to_top" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back to top"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回到顶部"
+          }
+        }
+      }
+    },
     "recommend.daily.badge" : {
       "extractionState" : "manual",
       "localizations" : {

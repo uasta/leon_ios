@@ -10,12 +10,14 @@ struct RecommendHomeView: View {
     @State private var isStockPickerExpanded: Bool = false
     @State private var draftStockNames: Set<String> = []
     @State private var stockFilterMessage: String?
+    @State private var showScrollToTopButton: Bool = false
 
     private let hotSearchColumns = [
         GridItem(.adaptive(minimum: 92), spacing: 10, alignment: .leading)
     ]
     private let dailyStripWidth: CGFloat = 268
     private let dailyStripHeight: CGFloat = 96
+    private let scrollToTopThreshold: CGFloat = 480
 
     private var trimmedQuery: String {
         store.query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -54,17 +56,61 @@ struct RecommendHomeView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    if isShowingSearchMode {
-                        searchSection
-                    } else {
-                        discoverHeroSection
-                        recommendationSection
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        Color.clear
+                            .frame(height: 0)
+                            .id("recommend-top")
+
+                        if isShowingSearchMode {
+                            searchSection
+                        } else {
+                            discoverHeroSection
+                            recommendationSection
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background {
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: RecommendScrollOffsetKey.self,
+                                value: geometry.frame(in: .named("recommend-scroll")).minY
+                            )
+                        }
                     }
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+                .coordinateSpace(name: "recommend-scroll")
+                .onPreferenceChange(RecommendScrollOffsetKey.self) { offset in
+                    let shouldShow = offset < -scrollToTopThreshold
+                    if shouldShow != showScrollToTopButton {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showScrollToTopButton = shouldShow
+                        }
+                    }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if showScrollToTopButton {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.28)) {
+                                proxy.scrollTo("recommend-top", anchor: .top)
+                            }
+                        } label: {
+                            Image(systemName: "chevron.up")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .frame(width: 44, height: 44)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.trailing, 18)
+                        .padding(.bottom, 18)
+                        .accessibilityLabel(L10n.text(L10n.Recommend.scrollToTop))
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                }
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle(L10n.text(L10n.Recommend.homeTitle))
@@ -117,6 +163,9 @@ struct RecommendHomeView: View {
                 stockFilterMessage = count > 0
                     ? L10n.Recommend.filterStockResultCount(count)
                     : L10n.text(L10n.Recommend.filterStockNoResult)
+            }
+            .onChange(of: isShowingSearchMode) { _, _ in
+                showScrollToTopButton = false
             }
             .refreshable {
                 if isShowingSearchMode {
@@ -1086,6 +1135,14 @@ private struct AdaptiveCoverImage<Placeholder: View>: View {
         .environmentObject(RecommendationStore(feed: RecommendationStore.sampleFeed))
         .environmentObject(IngredientStore())
         .environmentObject(SessionStore())
+}
+
+private struct RecommendScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
 }
 
 /// 按内容宽度换行的食材标签，避免 adaptive 网格把长名称挤成「菠…」。
