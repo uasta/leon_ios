@@ -27,6 +27,7 @@ final class RecommendationStore: ObservableObject {
     @Published private(set) var isLoading: Bool
     @Published private(set) var isLoadingMore: Bool
     @Published private(set) var hasMoreFeed: Bool
+    @Published private(set) var hasLoadedFeed: Bool
     @Published private(set) var feedSeed: Int
     @Published private(set) var isSearching: Bool
     @Published private(set) var isFetchingSuggestions: Bool
@@ -38,7 +39,6 @@ final class RecommendationStore: ObservableObject {
     private var rawFeed: [RecipeSummary]
     private var rawSearchResults: [RecipeSummary]
     private var feedPage: Int = 0
-    private var hasLoadedFeed = false
     private var hasLoadedHotSearches = false
     private var hasLoadedDaily = false
     private var interactionOverrides: [Int: InteractionState] = [:]
@@ -75,12 +75,18 @@ final class RecommendationStore: ObservableObject {
         self.isLoading = isLoading
         self.isLoadingMore = false
         self.hasMoreFeed = false
+        self.hasLoadedFeed = !feed.isEmpty
         self.feedSeed = sessionSeed + 41
         self.isSearching = isSearching
         self.isFetchingSuggestions = false
         self.errorMessage = errorMessage
         self.searchErrorMessage = nil
         self.lastSubmittedQuery = nil
+    }
+
+    /// 首屏尚未拉完时，列表区应显示加载而不是空状态。
+    var isBootstrappingFeed: Bool {
+        !hasLoadedFeed || (isLoading && feed.isEmpty)
     }
 
     private static func makeSessionSeed() -> Int {
@@ -97,6 +103,15 @@ final class RecommendationStore: ObservableObject {
         Set((dailyItems + dailyAlternatives).map(\.id))
     }
 
+    func prepareInitialLoad() {
+        if !hasLoadedFeed {
+            isLoading = true
+        }
+        if !hasLoadedDaily {
+            isLoadingDaily = true
+        }
+    }
+
     func setSelectedIngredientNames(_ names: [String]) {
         selectedIngredientNames = Self.normalizedNames(from: names)
         Task { await refreshForCurrentContext() }
@@ -108,7 +123,7 @@ final class RecommendationStore: ObservableObject {
     }
 
     func loadFeedIfNeeded() async {
-        guard !hasLoadedFeed, !isLoading else { return }
+        guard !hasLoadedFeed else { return }
         await refreshForCurrentContext()
     }
 

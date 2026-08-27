@@ -57,40 +57,35 @@ struct RecommendHomeView: View {
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        Color.clear
-                            .frame(height: 0)
-                            .id("recommend-top")
+                ZStack(alignment: .bottomTrailing) {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 14) {
+                            Color.clear
+                                .frame(height: 0)
+                                .id("recommend-top")
 
-                        if isShowingSearchMode {
-                            searchSection
-                        } else {
-                            discoverHeroSection
-                            recommendationSection
+                            if isShowingSearchMode {
+                                searchSection
+                            } else {
+                                discoverHeroSection
+                                recommendationSection
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                    }
+                    .scrollIndicators(.visible)
+                    .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                        geometry.contentOffset.y
+                    } action: { _, newOffset in
+                        let shouldShow = newOffset > scrollToTopThreshold
+                        if shouldShow != showScrollToTopButton {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showScrollToTopButton = shouldShow
+                            }
                         }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background {
-                        GeometryReader { geometry in
-                            Color.clear.preference(
-                                key: RecommendScrollOffsetKey.self,
-                                value: geometry.frame(in: .named("recommend-scroll")).minY
-                            )
-                        }
-                    }
-                }
-                .coordinateSpace(name: "recommend-scroll")
-                .onPreferenceChange(RecommendScrollOffsetKey.self) { offset in
-                    let shouldShow = offset < -scrollToTopThreshold
-                    if shouldShow != showScrollToTopButton {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            showScrollToTopButton = shouldShow
-                        }
-                    }
-                }
-                .overlay(alignment: .bottomTrailing) {
+
                     if showScrollToTopButton {
                         Button {
                             withAnimation(.easeInOut(duration: 0.28)) {
@@ -98,17 +93,18 @@ struct RecommendHomeView: View {
                             }
                         } label: {
                             Image(systemName: "chevron.up")
-                                .font(.headline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                                .frame(width: 44, height: 44)
-                                .background(.ultraThinMaterial, in: Circle())
-                                .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 48, height: 48)
+                                .background(AppTheme.accent, in: Circle())
+                                .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
                         }
                         .buttonStyle(.plain)
-                        .padding(.trailing, 18)
-                        .padding(.bottom, 18)
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 16)
                         .accessibilityLabel(L10n.text(L10n.Recommend.scrollToTop))
                         .transition(.scale.combined(with: .opacity))
+                        .zIndex(10)
                     }
                 }
             }
@@ -129,6 +125,7 @@ struct RecommendHomeView: View {
                 }
             }
             .task {
+                store.prepareInitialLoad()
                 // 先日推，再发现流，便于发现流排除日推已占用的菜。
                 await store.loadDailyIfNeeded(ingredientNames: activeIngredientNames)
                 prefetchCoverImages(for: store.dailyItems)
@@ -371,7 +368,7 @@ struct RecommendHomeView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if store.isLoading && store.feed.isEmpty {
+            if store.isBootstrappingFeed {
                 ProgressView(L10n.text(L10n.Recommend.feedLoading))
                     .frame(maxWidth: .infinity, minHeight: 160)
             } else if store.feed.isEmpty, let errorMessage = store.errorMessage {
@@ -1135,14 +1132,6 @@ private struct AdaptiveCoverImage<Placeholder: View>: View {
         .environmentObject(RecommendationStore(feed: RecommendationStore.sampleFeed))
         .environmentObject(IngredientStore())
         .environmentObject(SessionStore())
-}
-
-private struct RecommendScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
 }
 
 /// 按内容宽度换行的食材标签，避免 adaptive 网格把长名称挤成「菠…」。
