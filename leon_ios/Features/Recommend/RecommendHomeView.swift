@@ -126,12 +126,9 @@ struct RecommendHomeView: View {
             }
             .task {
                 store.prepareInitialLoad()
-                // 先日推，再发现流，便于发现流排除日推已占用的菜。
-                await store.loadDailyIfNeeded(ingredientNames: activeIngredientNames)
+                await store.bootstrapIfNeeded(ingredientNames: activeIngredientNames)
                 prefetchCoverImages(for: store.dailyItems)
-                await store.loadFeedIfNeeded()
                 prefetchCoverImages(for: store.feed)
-                await store.loadHotSearchesIfNeeded()
             }
             .onChange(of: store.feed.map(\.id)) { _, _ in
                 prefetchCoverImages(for: store.feed)
@@ -172,8 +169,7 @@ struct RecommendHomeView: View {
                         await store.loadHotSearchesIfNeeded()
                     }
                 } else {
-                    await store.retry()
-                    await store.refreshDaily(ingredientNames: activeIngredientNames, rotate: true)
+                    await store.pullToRefresh(ingredientNames: activeIngredientNames)
                 }
             }
         }

@@ -43,6 +43,8 @@ final class RecommendationStore: ObservableObject {
     private var hasLoadedDaily = false
     private var interactionOverrides: [Int: InteractionState] = [:]
     private var latestSuggestionQuery: String?
+    /// 串行化首屏/下拉/换一批，避免并发把 refreshable 卡死。
+    private var exclusiveRefreshTask: Task<Void, Never>?
 
     init(
         service: RecommendationService = RecommendationService(client: APIClient()),
@@ -89,6 +91,10 @@ final class RecommendationStore: ObservableObject {
         !hasLoadedFeed || (isLoading && feed.isEmpty)
     }
 
+    var isBootstrappingDaily: Bool {
+        !hasLoadedDaily && isLoadingDaily
+    }
+
     private static func makeSessionSeed() -> Int {
         let calendar = Calendar.current
         let now = Date()
@@ -110,6 +116,47 @@ final class RecommendationStore: ObservableObject {
         if !hasLoadedDaily {
             isLoadingDaily = true
         }
+    }
+
+    /// 首屏完整加载（日推 → 发现流），与下拉刷新互斥。
+    func bootstrapIfNeeded(ingredientNames: [String] = []) async {
+        await runExclusive {
+            if !self.hasLoadedDaily {
+                await self.refreshDaily(ingredientNames: ingredientNames, rotate: false)
+            }
+            if !self.hasLoadedFeed {
+                await self.refreshForCurrentContext(rotateFeed: false)
+            }
+            if !self.hasLoadedHotSearches {
+                await self.refreshHotSearches()
+            }
+        }
+    }
+
+    /// 下拉刷新：首屏未完成时先等它结束，避免两个请求把滚动卡住。
+    func pullToRefresh(ingredientNames: [String] = []) async {
+        if isBootstrappingFeed || isBootstrappingDaily {
+            await exclusiveRefreshTask?.value
+            if hasLoadedFeed || hasLoadedDaily {
+                return
+            }
+        }
+
+        await runExclusive {
+            await self.refreshForCurrentContext(rotateFeed: true)
+            await self.refreshDaily(ingredientNames: ingredientNames, rotate: true)
+        }
+    }
+
+    private func runExclusive(_ work: @escaping @MainActor () async -> Void) async {
+        let previous = exclusiveRefreshTask
+        let task = Task { @MainActor in
+            await previous?.value
+            guard !Task.isCancelled else { return }
+            await work()
+        }
+        exclusiveRefreshTask = task
+        await task.value
     }
 
     func setSelectedIngredientNames(_ names: [String]) {
@@ -163,7 +210,8 @@ final class RecommendationStore: ObservableObject {
     }
 
     func loadDailyIfNeeded(ingredientNames: [String] = []) async {
-        guard !hasLoadedDaily, !isLoadingDaily else { return }
+        // 只看是否已加载；不要用 isLoadingDaily 挡，否则 prepareInitialLoad 会把自己卡死。
+        guard !hasLoadedDaily else { return }
         await refreshDaily(ingredientNames: ingredientNames)
     }
 
@@ -214,15 +262,30 @@ final class RecommendationStore: ObservableObject {
                 }
             }
 
+            if primary.isEmpty && secondary.isEmpty {
+                let retry = try await fetchDailyFallback(
+                    batch: nextBatch + 11,
+                    excluding: previousPrimary.union(previousSecondary)
+                )
+                primary = retry.primary
+                secondary = retry.secondary
+            }
+
             applyDaily(primary: primary, secondary: secondary, batch: response.data.batch ?? nextBatch)
             preferredFlavors = response.data.preferredFlavors
         } catch {
-            // daily 接口未部署/404 时，用 feed 专属种子兜底，保证首推/次推都能刷出来。
+            // daily 接口未部署/404 时，用 feed 专属种子兜底。
             do {
-                let fallback = try await fetchDailyFallback(
+                var fallback = try await fetchDailyFallback(
                     batch: nextBatch,
                     excluding: rotate ? previousPrimary.union(previousSecondary) : []
                 )
+                if fallback.primary.isEmpty && fallback.secondary.isEmpty {
+                    fallback = try await fetchDailyFallback(
+                        batch: nextBatch + 23,
+                        excluding: previousPrimary.union(previousSecondary)
+                    )
+                }
                 applyDaily(primary: fallback.primary, secondary: fallback.secondary, batch: nextBatch)
             } catch {
                 if rotate {
@@ -239,7 +302,9 @@ final class RecommendationStore: ObservableObject {
         dailyFeatured = primary.first
         dailyAlternatives = secondary
         dailyBatch = batch
-        hasLoadedDaily = true
+        if !primary.isEmpty || !secondary.isEmpty {
+            hasLoadedDaily = true
+        }
         dedupeFeedAgainstDaily()
     }
 
@@ -248,18 +313,26 @@ final class RecommendationStore: ObservableObject {
         batch: Int,
         excluding: Set<Int>
     ) async throws -> (primary: [RecipeSummary], secondary: [RecipeSummary]) {
-        let seed = max(1, feedSeed + batch * 17 + 233)
-        let response = try await service.fetchRecommendationFeed(
-            page: 1,
-            limit: 20,
-            seed: seed,
-            excludeIDs: Array(excluding)
-        )
-        // 过滤演示假数据，避免永远番茄炒蛋/青椒土豆丝。
         let fakeDemoIDs: Set<Int> = [101, 102, 103]
-        let pool = response.data.items.filter { recipe in
-            !excluding.contains(recipe.id) && !fakeDemoIDs.contains(recipe.id)
+        let seed = max(1, feedSeed + batch * 17 + 233)
+        var pool: [RecipeSummary] = []
+
+        for attempt in 0..<3 {
+            let page = attempt == 0 ? 1 : ((seed + attempt * 37) % 300) + 1
+            let response = try await service.fetchRecommendationFeed(
+                page: page,
+                limit: 20,
+                seed: attempt == 0 ? seed : seed + attempt * 13,
+                excludeIDs: Array(excluding)
+            )
+            pool = response.data.items.filter { recipe in
+                !excluding.contains(recipe.id) && !fakeDemoIDs.contains(recipe.id)
+            }
+            if pool.count >= 4 {
+                break
+            }
         }
+
         let primary = Array(pool.prefix(3))
         let secondary = Array(pool.dropFirst(3).prefix(8))
         return (applyInteractionState(to: primary), applyInteractionState(to: secondary))
