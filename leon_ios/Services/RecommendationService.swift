@@ -72,11 +72,22 @@ actor RecommendationService {
             }
         }
 
-        /// 统一给 UI 用的今日推荐列表。
-        var displayItems: [RecipeSummary] {
+        /// 首推带图列表（不要和次推混用）。
+        var primaryItems: [RecipeSummary] {
             if !items.isEmpty { return items }
-            if let featured { return [featured] + alternatives }
-            return alternatives
+            if let featured { return [featured] }
+            return []
+        }
+
+        /// 次推名称标签列表。
+        var secondaryItems: [RecipeSummary] {
+            alternatives
+        }
+
+        /// 兼容旧用法：首推 + 次推去重合并。
+        var displayItems: [RecipeSummary] {
+            var seen = Set<Int>()
+            return (primaryItems + secondaryItems).filter { seen.insert($0.id).inserted }
         }
     }
 
@@ -129,15 +140,25 @@ actor RecommendationService {
         self.client = client
     }
 
-    func fetchRecommendationFeed(page: Int = 1, limit: Int = 20, seed: Int = 0) async throws -> APIEnvelope<RecommendationFeedPage> {
-        try await client.send(
+    func fetchRecommendationFeed(
+        page: Int = 1,
+        limit: Int = 20,
+        seed: Int = 0,
+        excludeIDs: [Int] = []
+    ) async throws -> APIEnvelope<RecommendationFeedPage> {
+        var queryItems = [
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "seed", value: String(max(0, seed))),
+        ]
+        for id in excludeIDs.prefix(50) {
+            queryItems.append(URLQueryItem(name: "exclude[]", value: String(id)))
+        }
+
+        return try await client.send(
             APIRequest(
                 path: "api/v1/recommendations/feed",
-                queryItems: [
-                    URLQueryItem(name: "page", value: String(page)),
-                    URLQueryItem(name: "limit", value: String(limit)),
-                    URLQueryItem(name: "seed", value: String(max(0, seed))),
-                ]
+                queryItems: queryItems
             ),
             as: RecommendationFeedPage.self
         )

@@ -67,7 +67,7 @@ final class RecommendationStore: ObservableObject {
         self.dailyItems = []
         self.dailyFeatured = nil
         self.dailyAlternatives = []
-        // 冷启动就带上会话种子，避免首次永远落到热度第 1 页。
+        // 冷启动就带上会话种子；日推与发现流错开，减少首屏撞车。
         let sessionSeed = Self.makeSessionSeed()
         self.dailyBatch = sessionSeed % 30
         self.preferredFlavors = []
@@ -75,7 +75,7 @@ final class RecommendationStore: ObservableObject {
         self.isLoading = isLoading
         self.isLoadingMore = false
         self.hasMoreFeed = false
-        self.feedSeed = sessionSeed
+        self.feedSeed = sessionSeed + 41
         self.isSearching = isSearching
         self.isFetchingSuggestions = false
         self.errorMessage = errorMessage
@@ -90,6 +90,11 @@ final class RecommendationStore: ObservableObject {
         let hour = calendar.component(.hour, from: now)
         let minuteBucket = calendar.component(.minute, from: now) / 5
         return day * 1000 + hour * 20 + minuteBucket + Int.random(in: 0...199)
+    }
+
+    /// 今天吃点什么里已出现的菜，发现流要避开。
+    var dailyOccupiedIDs: Set<Int> {
+        Set((dailyItems + dailyAlternatives).map(\.id))
     }
 
     func setSelectedIngredientNames(_ names: [String]) {
@@ -114,14 +119,18 @@ final class RecommendationStore: ObservableObject {
         guard rawFeed.suffix(4).contains(where: { $0.id == currentRecipeID }) else { return }
 
         isLoadingMore = true
+        let excludeIDs = Array(dailyOccupiedIDs)
 
         do {
-            let response = try await service.fetchRecommendationFeed(page: feedPage + 1, seed: feedSeed)
+            let response = try await service.fetchRecommendationFeed(
+                page: feedPage + 1,
+                seed: feedSeed,
+                excludeIDs: excludeIDs
+            )
             feedPage = response.data.page
             hasMoreFeed = response.data.hasMore
-            let incoming = response.data.items.filter { incoming in
-                !rawFeed.contains(where: { $0.id == incoming.id })
-            }
+            let blocked = dailyOccupiedIDs.union(Set(rawFeed.map(\.id)))
+            let incoming = response.data.items.filter { !blocked.contains($0.id) }
             rawFeed.append(contentsOf: incoming)
             feed = applyInteractionState(to: rawFeed)
         } catch {
@@ -145,7 +154,8 @@ final class RecommendationStore: ObservableObject {
 
     func refreshDaily(ingredientNames: [String] = [], batch: Int? = nil, rotate: Bool = false) async {
         isLoadingDaily = true
-        let previousIDs = Set(dailyItems.map(\.id))
+        let previousPrimary = Set(dailyItems.map(\.id))
+        let previousSecondary = Set(dailyAlternatives.map(\.id))
         let nextBatch: Int = {
             if let batch { return max(0, batch) }
             if rotate { return dailyBatch + 1 }
@@ -155,39 +165,44 @@ final class RecommendationStore: ObservableObject {
         do {
             let response = try await service.fetchDailyRecommendation(
                 ingredients: Self.normalizedNames(from: ingredientNames),
-                limit: 6,
+                limit: 3,
                 batch: nextBatch
             )
-            var items = applyInteractionState(to: response.data.displayItems)
+            var primary = applyInteractionState(to: response.data.primaryItems)
+            var secondary = applyInteractionState(to: response.data.secondaryItems)
 
-            // 服务端若尚未部署 batch，本地再切一批，保证「换一批」肉眼可见。
-            if rotate, !items.isEmpty, Set(items.map(\.id)) == previousIDs, !feed.isEmpty {
-                let start = (nextBatch * 3) % max(feed.count, 1)
-                let rotated = Array(feed[start...]) + Array(feed[..<start])
-                items = Array(rotated.prefix(6))
+            // 旧服务端若仍把次推当成首推尾巴，强制拆开，避免两排同一批菜。
+            if secondary.isEmpty, primary.count > 1 {
+                secondary = Array(primary.dropFirst())
+                primary = Array(primary.prefix(1))
+            }
+            let primaryIDs = Set(primary.map(\.id))
+            secondary = secondary.filter { !primaryIDs.contains($0.id) }
+
+            if rotate,
+               Set(primary.map(\.id)) == previousPrimary,
+               Set(secondary.map(\.id)) == previousSecondary,
+               !feed.isEmpty {
+                let pool = feed.filter { !previousPrimary.contains($0.id) }
+                if pool.count >= 4 {
+                    let start = (nextBatch * 2) % pool.count
+                    let rotated = Array(pool[start...]) + Array(pool[..<start])
+                    primary = Array(rotated.prefix(3))
+                    secondary = Array(rotated.dropFirst(3).prefix(8))
+                }
             }
 
-            dailyItems = items
-            dailyFeatured = items.first
-            dailyAlternatives = Array(items.dropFirst())
+            dailyItems = primary
+            dailyFeatured = primary.first
+            dailyAlternatives = secondary
             dailyBatch = response.data.batch ?? nextBatch
             preferredFlavors = response.data.preferredFlavors
             hasLoadedDaily = true
+            dedupeFeedAgainstDaily()
         } catch {
-            // 网络失败时也尽量本地换一批，避免按钮点了没反应。
-            if rotate, !feed.isEmpty {
-                let start = (nextBatch * 3) % max(feed.count, 1)
-                let rotated = Array(feed[start...]) + Array(feed[..<start])
-                let items = Array(rotated.prefix(6))
-                dailyItems = items
-                dailyFeatured = items.first
-                dailyAlternatives = Array(items.dropFirst())
+            // 失败时不要直接复用发现流，否则首屏上下会一模一样。
+            if rotate {
                 dailyBatch = nextBatch
-            } else if dailyItems.isEmpty {
-                let fallback = Array(feed.prefix(6))
-                dailyItems = fallback
-                dailyFeatured = fallback.first
-                dailyAlternatives = Array(fallback.dropFirst())
             }
         }
 
@@ -327,18 +342,27 @@ final class RecommendationStore: ObservableObject {
         hasMoreFeed = false
 
         let nextSeed = rotate ? feedSeed + 1 : feedSeed
+        let excludeIDs = Array(dailyOccupiedIDs)
 
         do {
-            var response = try await service.fetchRecommendationFeed(page: 1, seed: nextSeed)
-            var items = response.data.items
+            var response = try await service.fetchRecommendationFeed(
+                page: 1,
+                seed: nextSeed,
+                excludeIDs: excludeIDs
+            )
+            var items = response.data.items.filter { !dailyOccupiedIDs.contains($0.id) }
 
             // 旧服务端忽略 seed 时会返回同一页；再按 seed 跳页，保证下拉能看到新菜。
             if rotate,
                !items.isEmpty,
                items.map(\.id) == rawFeed.prefix(items.count).map(\.id) {
                 let jumpPage = (nextSeed % 400) + 1
-                response = try await service.fetchRecommendationFeed(page: jumpPage, seed: 0)
-                items = response.data.items
+                response = try await service.fetchRecommendationFeed(
+                    page: jumpPage,
+                    seed: 0,
+                    excludeIDs: excludeIDs
+                )
+                items = response.data.items.filter { !dailyOccupiedIDs.contains($0.id) }
             }
 
             feedPage = max(1, response.data.page)
@@ -358,6 +382,15 @@ final class RecommendationStore: ObservableObject {
         }
 
         isLoading = false
+    }
+
+    private func dedupeFeedAgainstDaily() {
+        let blocked = dailyOccupiedIDs
+        guard !blocked.isEmpty, !rawFeed.isEmpty else { return }
+        let filtered = rawFeed.filter { !blocked.contains($0.id) }
+        guard filtered.count != rawFeed.count else { return }
+        rawFeed = filtered
+        feed = applyInteractionState(to: rawFeed)
     }
 
     private func refreshFeedByIngredients() async {
@@ -448,8 +481,8 @@ final class RecommendationStore: ObservableObject {
         feed = applyInteractionState(to: rawFeed)
         searchResults = applyInteractionState(to: rawSearchResults)
         dailyItems = applyInteractionState(to: dailyItems)
+        dailyAlternatives = applyInteractionState(to: dailyAlternatives)
         dailyFeatured = dailyItems.first
-        dailyAlternatives = Array(dailyItems.dropFirst())
     }
 
     private func mergedSuggestionList(remote: [String], query: String) -> [String] {

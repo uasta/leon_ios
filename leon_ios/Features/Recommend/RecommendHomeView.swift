@@ -37,14 +37,19 @@ struct RecommendHomeView: View {
         }
     }
 
-    private var dailyDisplayItems: [RecipeSummary] {
+    private var dailyPrimaryItems: [RecipeSummary] {
         if !store.dailyItems.isEmpty {
             return store.dailyItems
         }
         if let featured = store.dailyFeatured {
-            return [featured] + store.dailyAlternatives
+            return [featured]
         }
-        return store.dailyAlternatives
+        return []
+    }
+
+    private var dailySecondaryItems: [RecipeSummary] {
+        let primaryIDs = Set(dailyPrimaryItems.map(\.id))
+        return store.dailyAlternatives.filter { !primaryIDs.contains($0.id) }
     }
 
     var body: some View {
@@ -78,9 +83,11 @@ struct RecommendHomeView: View {
                 }
             }
             .task {
+                // 先日推，再发现流，便于发现流排除日推已占用的菜。
+                await store.loadDailyIfNeeded(ingredientNames: activeIngredientNames)
+                prefetchCoverImages(for: store.dailyItems)
                 await store.loadFeedIfNeeded()
                 prefetchCoverImages(for: store.feed)
-                await store.loadDailyIfNeeded(ingredientNames: activeIngredientNames)
                 await store.loadHotSearchesIfNeeded()
             }
             .onChange(of: store.feed.map(\.id)) { _, _ in
@@ -161,44 +168,51 @@ struct RecommendHomeView: View {
                 .accessibilityLabel(L10n.text(L10n.Recommend.heroRefresh))
             }
 
-            if store.isLoadingDaily && dailyDisplayItems.isEmpty {
+            if store.isLoadingDaily && dailyPrimaryItems.isEmpty && dailySecondaryItems.isEmpty {
                 ProgressView()
                     .frame(maxWidth: .infinity)
                     .frame(height: dailyStripHeight)
-            } else if !dailyDisplayItems.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(dailyDisplayItems) { recipe in
-                            NavigationLink(value: recipe) {
-                                dailyStripCard(recipe)
+            } else if !dailyPrimaryItems.isEmpty || !dailySecondaryItems.isEmpty {
+                if !dailyPrimaryItems.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(dailyPrimaryItems) { recipe in
+                                NavigationLink(value: recipe) {
+                                    dailyStripCard(recipe)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
+                        .padding(.horizontal, 2)
                     }
-                    .padding(.horizontal, 2)
+                    // 固定高度，避免横向 ScrollView 在 LazyVStack 里高度塌缩导致与下方列表重叠。
+                    .frame(height: dailyStripHeight)
                 }
-                // 固定高度，避免横向 ScrollView 在 LazyVStack 里高度塌缩导致与下方列表重叠。
-                .frame(height: dailyStripHeight)
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(dailyDisplayItems) { recipe in
-                            NavigationLink(value: recipe) {
-                                Text(recipe.title)
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(Color(red: 0.34, green: 0.21, blue: 0.09))
-                                    .lineLimit(1)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .background(Color.white.opacity(0.78), in: Capsule())
+                if !dailySecondaryItems.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(dailySecondaryItems) { recipe in
+                                NavigationLink(value: recipe) {
+                                    Text(recipe.title)
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(Color(red: 0.34, green: 0.21, blue: 0.09))
+                                        .lineLimit(1)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(Color.white.opacity(0.78), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
+                        .padding(.horizontal, 2)
                     }
-                    .padding(.horizontal, 2)
+                    .frame(height: 36)
                 }
-                .frame(height: 36)
-                .id("daily-\(store.dailyBatch)-\(dailyDisplayItems.map { String($0.id) }.joined(separator: "-"))")
+
+                Color.clear
+                    .frame(height: 0)
+                    .id("daily-\(store.dailyBatch)-p\(dailyPrimaryItems.map { String($0.id) }.joined(separator: "-"))-s\(dailySecondaryItems.map { String($0.id) }.joined(separator: "-"))")
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
