@@ -171,42 +171,83 @@ final class RecommendationStore: ObservableObject {
             var primary = applyInteractionState(to: response.data.primaryItems)
             var secondary = applyInteractionState(to: response.data.secondaryItems)
 
-            // 旧服务端若仍把次推当成首推尾巴，强制拆开，避免两排同一批菜。
-            if secondary.isEmpty, primary.count > 1 {
+            // 旧服务端若仍把次推当成首推尾巴，强制拆开。
+            if secondary.isEmpty, primary.count > 3 {
+                secondary = Array(primary.dropFirst(3))
+                primary = Array(primary.prefix(3))
+            } else if secondary.isEmpty, primary.count > 1 {
                 secondary = Array(primary.dropFirst())
-                primary = Array(primary.prefix(1))
+                primary = Array(primary.prefix(max(1, primary.count / 2)))
             }
             let primaryIDs = Set(primary.map(\.id))
             secondary = secondary.filter { !primaryIDs.contains($0.id) }
 
-            if rotate,
-               Set(primary.map(\.id)) == previousPrimary,
-               Set(secondary.map(\.id)) == previousSecondary,
-               !feed.isEmpty {
-                let pool = feed.filter { !previousPrimary.contains($0.id) }
-                if pool.count >= 4 {
-                    let start = (nextBatch * 2) % pool.count
-                    let rotated = Array(pool[start...]) + Array(pool[..<start])
-                    primary = Array(rotated.prefix(3))
-                    secondary = Array(rotated.dropFirst(3).prefix(8))
+            if primary.isEmpty && secondary.isEmpty {
+                let fallback = try await fetchDailyFallback(batch: nextBatch, excluding: [])
+                primary = fallback.primary
+                secondary = fallback.secondary
+            } else if rotate,
+                      Set(primary.map(\.id)) == previousPrimary,
+                      Set(secondary.map(\.id)) == previousSecondary {
+                let fallback = try await fetchDailyFallback(
+                    batch: nextBatch,
+                    excluding: previousPrimary.union(previousSecondary)
+                )
+                if !fallback.primary.isEmpty || !fallback.secondary.isEmpty {
+                    primary = fallback.primary
+                    secondary = fallback.secondary
                 }
             }
 
-            dailyItems = primary
-            dailyFeatured = primary.first
-            dailyAlternatives = secondary
-            dailyBatch = response.data.batch ?? nextBatch
+            applyDaily(primary: primary, secondary: secondary, batch: response.data.batch ?? nextBatch)
             preferredFlavors = response.data.preferredFlavors
-            hasLoadedDaily = true
-            dedupeFeedAgainstDaily()
         } catch {
-            // 失败时不要直接复用发现流，否则首屏上下会一模一样。
-            if rotate {
-                dailyBatch = nextBatch
+            // daily 接口未部署/404 时，用 feed 专属种子兜底，保证首推/次推都能刷出来。
+            do {
+                let fallback = try await fetchDailyFallback(
+                    batch: nextBatch,
+                    excluding: rotate ? previousPrimary.union(previousSecondary) : []
+                )
+                applyDaily(primary: fallback.primary, secondary: fallback.secondary, batch: nextBatch)
+            } catch {
+                if rotate {
+                    dailyBatch = nextBatch
+                }
             }
         }
 
         isLoadingDaily = false
+    }
+
+    private func applyDaily(primary: [RecipeSummary], secondary: [RecipeSummary], batch: Int) {
+        dailyItems = primary
+        dailyFeatured = primary.first
+        dailyAlternatives = secondary
+        dailyBatch = batch
+        hasLoadedDaily = true
+        dedupeFeedAgainstDaily()
+    }
+
+    /// 当 daily 不可用时，用发现流接口另起种子，拆成首推（带图）+ 次推（标签）。
+    private func fetchDailyFallback(
+        batch: Int,
+        excluding: Set<Int>
+    ) async throws -> (primary: [RecipeSummary], secondary: [RecipeSummary]) {
+        let seed = max(1, feedSeed + batch * 17 + 233)
+        let response = try await service.fetchRecommendationFeed(
+            page: 1,
+            limit: 20,
+            seed: seed,
+            excludeIDs: Array(excluding)
+        )
+        // 过滤演示假数据，避免永远番茄炒蛋/青椒土豆丝。
+        let fakeDemoIDs: Set<Int> = [101, 102, 103]
+        let pool = response.data.items.filter { recipe in
+            !excluding.contains(recipe.id) && !fakeDemoIDs.contains(recipe.id)
+        }
+        let primary = Array(pool.prefix(3))
+        let secondary = Array(pool.dropFirst(3).prefix(8))
+        return (applyInteractionState(to: primary), applyInteractionState(to: secondary))
     }
 
     func refreshForCurrentContext(rotateFeed: Bool = false) async {

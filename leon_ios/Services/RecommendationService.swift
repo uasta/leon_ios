@@ -63,12 +63,13 @@ actor RecommendationService {
             featured = try container.decodeIfPresent(RecipeSummary.self, forKey: .featured)
             alternatives = (try? container.decode([RecipeSummary].self, forKey: .alternatives)) ?? []
 
+            // 首推只用 items/featured，不要把次推 alternatives 混进 items。
             if let decodedItems = try? container.decode([RecipeSummary].self, forKey: .items), !decodedItems.isEmpty {
                 items = decodedItems
             } else if let featured {
-                items = [featured] + alternatives
+                items = [featured]
             } else {
-                items = alternatives
+                items = []
             }
         }
 
@@ -81,7 +82,8 @@ actor RecommendationService {
 
         /// 次推名称标签列表。
         var secondaryItems: [RecipeSummary] {
-            alternatives
+            let primaryIDs = Set(primaryItems.map(\.id))
+            return alternatives.filter { !primaryIDs.contains($0.id) }
         }
 
         /// 兼容旧用法：首推 + 次推去重合并。
