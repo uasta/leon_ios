@@ -230,6 +230,13 @@ struct RecommendHomeView: View {
             if store.isLoading && store.feed.isEmpty {
                 ProgressView(L10n.text(L10n.Recommend.feedLoading))
                     .frame(maxWidth: .infinity, minHeight: 160)
+            } else if store.feed.isEmpty, let errorMessage = store.errorMessage {
+                ContentUnavailableView(
+                    L10n.text(L10n.Recommend.feedEmptyTitle),
+                    systemImage: "wifi.exclamationmark",
+                    description: Text(errorMessage)
+                )
+                .frame(maxWidth: .infinity, minHeight: 160)
             } else if displayedFeed.isEmpty {
                 ContentUnavailableView(
                     L10n.text(L10n.Recommend.feedEmptyTitle),
@@ -732,6 +739,6 @@ private struct RecipeCard: View {
 
 #Preview {
     RecommendHomeView()
-        .environmentObject(RecommendationStore())
+        .environmentObject(RecommendationStore(feed: RecommendationStore.sampleFeed))
         .environmentObject(SessionStore())
 }

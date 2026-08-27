@@ -38,7 +38,7 @@ final class RecommendationStore: ObservableObject {
 
     init(
         service: RecommendationService = RecommendationService(client: APIClient()),
-        feed: [RecipeSummary] = RecommendationStore.sampleFeed,
+        feed: [RecipeSummary] = [],
         searchResults: [RecipeSummary] = [],
         searchSuggestions: [String] = [],
         hotSearches: [String] = RecommendationStore.sampleHotSearches,
@@ -250,10 +250,6 @@ final class RecommendationStore: ObservableObject {
             hasLoadedFeed = true
         } catch {
             errorMessage = error.localizedDescription
-            if feed.isEmpty {
-                rawFeed = Self.sampleFeed
-                feed = applyInteractionState(to: rawFeed)
-            }
         }
 
         isLoading = false
@@ -272,10 +268,6 @@ final class RecommendationStore: ObservableObject {
             hasLoadedFeed = true
         } catch {
             errorMessage = error.localizedDescription
-            if feed.isEmpty {
-                rawFeed = Self.sampleFeed
-                feed = applyInteractionState(to: rawFeed)
-            }
         }
 
         isLoading = false
