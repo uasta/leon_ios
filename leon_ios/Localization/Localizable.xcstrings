@@ -4980,6 +4980,40 @@
         }
       }
     },
+    "recommend.filter.stock_result_count" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Found %d recipes"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找到 %d 道相关菜"
+          }
+        }
+      }
+    },
+    "recommend.filter.stock_no_result" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No recipes matched. Try different ingredients."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这几样暂时没匹配到菜，换几个食材再试试"
+          }
+        }
+      }
+    },
     "recommend.hero.subtitle_with_ingredients" : {
       "extractionState" : "manual",
       "localizations" : {

@@ -18,6 +18,24 @@ actor RecommendationService {
     struct ByIngredientsResponse: Decodable {
         let ingredients: [String]
         let recipes: [RecipeSummary]
+        let total: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case ingredients
+            case recipes
+            case total
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            ingredients = (try? container.decode([String].self, forKey: .ingredients)) ?? []
+            recipes = (try? container.decode([RecipeSummary].self, forKey: .recipes)) ?? []
+            if let total = try? container.decode(Int.self, forKey: .total) {
+                self.total = total
+            } else {
+                self.total = recipes.count
+            }
+        }
     }
 
     struct DailyRecommendationResponse: Decodable {

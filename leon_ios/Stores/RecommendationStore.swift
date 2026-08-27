@@ -67,18 +67,29 @@ final class RecommendationStore: ObservableObject {
         self.dailyItems = []
         self.dailyFeatured = nil
         self.dailyAlternatives = []
-        self.dailyBatch = 0
+        // 冷启动就带上会话种子，避免首次永远落到热度第 1 页。
+        let sessionSeed = Self.makeSessionSeed()
+        self.dailyBatch = sessionSeed % 30
         self.preferredFlavors = []
         self.isLoadingDaily = false
         self.isLoading = isLoading
         self.isLoadingMore = false
         self.hasMoreFeed = false
-        self.feedSeed = 0
+        self.feedSeed = sessionSeed
         self.isSearching = isSearching
         self.isFetchingSuggestions = false
         self.errorMessage = errorMessage
         self.searchErrorMessage = nil
         self.lastSubmittedQuery = nil
+    }
+
+    private static func makeSessionSeed() -> Int {
+        let calendar = Calendar.current
+        let now = Date()
+        let day = calendar.ordinality(of: .day, in: .year, for: now) ?? 1
+        let hour = calendar.component(.hour, from: now)
+        let minuteBucket = calendar.component(.minute, from: now) / 5
+        return day * 1000 + hour * 20 + minuteBucket + Int.random(in: 0...199)
     }
 
     func setSelectedIngredientNames(_ names: [String]) {

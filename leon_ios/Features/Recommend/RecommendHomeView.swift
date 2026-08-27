@@ -93,7 +93,23 @@ struct RecommendHomeView: View {
                 isStockFilterEnabled = !names.isEmpty
                 if names.isEmpty {
                     isStockPickerExpanded = false
+                    draftStockNames = []
+                    stockFilterMessage = nil
+                } else {
+                    draftStockNames = Set(names)
+                    if store.feed.isEmpty, !store.isLoading {
+                        stockFilterMessage = L10n.text(L10n.Recommend.filterStockNoResult)
+                    } else if !store.feed.isEmpty {
+                        stockFilterMessage = L10n.Recommend.filterStockResultCount(store.feed.count)
+                    }
                 }
+            }
+            .onChange(of: store.feed.count) { _, count in
+                guard isStockFilterEnabled else { return }
+                if store.isLoading { return }
+                stockFilterMessage = count > 0
+                    ? L10n.Recommend.filterStockResultCount(count)
+                    : L10n.text(L10n.Recommend.filterStockNoResult)
             }
             .refreshable {
                 if isShowingSearchMode {
@@ -163,6 +179,25 @@ struct RecommendHomeView: View {
                 }
                 // 固定高度，避免横向 ScrollView 在 LazyVStack 里高度塌缩导致与下方列表重叠。
                 .frame(height: dailyStripHeight)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(dailyDisplayItems) { recipe in
+                            NavigationLink(value: recipe) {
+                                Text(recipe.title)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(Color(red: 0.34, green: 0.21, blue: 0.09))
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color.white.opacity(0.78), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
+                .frame(height: 36)
                 .id("daily-\(store.dailyBatch)-\(dailyDisplayItems.map { String($0.id) }.joined(separator: "-"))")
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -265,9 +300,6 @@ struct RecommendHomeView: View {
             if isStockPickerExpanded {
                 stockPickerPanel
                     .transition(.opacity.combined(with: .move(edge: .top)))
-            } else if isStockFilterEnabled, !store.selectedIngredientNames.isEmpty {
-                stockActiveSummary
-                    .transition(.opacity)
             }
 
             if let stockFilterMessage {
@@ -288,9 +320,15 @@ struct RecommendHomeView: View {
                 .frame(maxWidth: .infinity, minHeight: 160)
             } else if store.feed.isEmpty {
                 ContentUnavailableView(
-                    L10n.text(L10n.Recommend.feedEmptyTitle),
+                    isStockFilterEnabled
+                        ? L10n.text(L10n.Recommend.filterStockNoResult)
+                        : L10n.text(L10n.Recommend.feedEmptyTitle),
                     systemImage: "fork.knife",
-                    description: Text(L10n.text(L10n.Recommend.feedEmptySubtitle))
+                    description: Text(
+                        isStockFilterEnabled
+                            ? L10n.text(L10n.Recommend.filterStockHint)
+                            : L10n.text(L10n.Recommend.feedEmptySubtitle)
+                    )
                 )
             } else {
                 waterfallGrid(store.feed)
@@ -307,35 +345,6 @@ struct RecommendHomeView: View {
         .animation(.easeInOut(duration: 0.22), value: isStockFilterEnabled)
     }
 
-    private var stockActiveSummary: some View {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(L10n.text(L10n.Recommend.filterStockActiveHint))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(store.selectedIngredientNames.joined(separator: "、"))
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-            }
-
-            Spacer(minLength: 8)
-
-            Button(L10n.text(L10n.Action.clear)) {
-                withAnimation(.easeInOut(duration: 0.22)) {
-                    isStockFilterEnabled = false
-                    isStockPickerExpanded = false
-                    draftStockNames = []
-                    stockFilterMessage = nil
-                }
-                store.clearSelectedIngredientNames()
-            }
-            .font(.caption)
-        }
-        .padding(12)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
-    }
-
     private var stockPickerPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(L10n.text(L10n.Recommend.filterStockHint))
@@ -347,6 +356,16 @@ struct RecommendHomeView: View {
                 selected: $draftStockNames
             )
 
+            if isStockFilterEnabled, !store.feed.isEmpty {
+                Text(L10n.Recommend.filterStockResultCount(store.feed.count))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(AppTheme.accent)
+            } else if isStockFilterEnabled, store.feed.isEmpty, !store.isLoading {
+                Text(L10n.text(L10n.Recommend.filterStockNoResult))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             HStack(spacing: 10) {
                 Text(L10n.Recommend.filterStockSelectedCount(draftStockNames.count))
                     .font(.caption)
@@ -355,11 +374,7 @@ struct RecommendHomeView: View {
                 Spacer(minLength: 0)
 
                 Button(L10n.text(L10n.Recommend.filterStockCancel)) {
-                    withAnimation(.easeInOut(duration: 0.22)) {
-                        isStockPickerExpanded = false
-                        draftStockNames = Set(store.selectedIngredientNames)
-                        stockFilterMessage = nil
-                    }
+                    clearStockFilter()
                 }
                 .font(.subheadline)
 
@@ -368,7 +383,7 @@ struct RecommendHomeView: View {
                 }
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(draftStockNames.isEmpty ? .secondary : AppTheme.accent)
-                .disabled(draftStockNames.isEmpty)
+                .disabled(draftStockNames.isEmpty || store.isLoading)
             }
         }
         .padding(14)
@@ -399,19 +414,9 @@ struct RecommendHomeView: View {
 
     private func toggleStockFilter() {
         if isStockPickerExpanded {
+            // 面板已开：再次点击收起（不清除已生效的筛选）
             withAnimation(.easeInOut(duration: 0.22)) {
                 isStockPickerExpanded = false
-                draftStockNames = Set(store.selectedIngredientNames)
-                stockFilterMessage = nil
-            }
-            return
-        }
-
-        if isStockFilterEnabled {
-            withAnimation(.easeInOut(duration: 0.22)) {
-                draftStockNames = Set(store.selectedIngredientNames)
-                isStockPickerExpanded = true
-                stockFilterMessage = nil
             }
             return
         }
@@ -423,10 +428,24 @@ struct RecommendHomeView: View {
         }
 
         withAnimation(.easeInOut(duration: 0.22)) {
-            draftStockNames = Set(names)
+            if draftStockNames.isEmpty {
+                draftStockNames = isStockFilterEnabled
+                    ? Set(store.selectedIngredientNames)
+                    : Set(names)
+            }
             isStockPickerExpanded = true
             stockFilterMessage = nil
         }
+    }
+
+    private func clearStockFilter() {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            isStockFilterEnabled = false
+            isStockPickerExpanded = false
+            draftStockNames = []
+            stockFilterMessage = nil
+        }
+        store.clearSelectedIngredientNames()
     }
 
     private func applyStockFilter() {
@@ -437,7 +456,7 @@ struct RecommendHomeView: View {
         }
 
         withAnimation(.easeInOut(duration: 0.22)) {
-            isStockPickerExpanded = false
+            isStockPickerExpanded = true
             isStockFilterEnabled = true
             stockFilterMessage = nil
         }
@@ -1055,17 +1074,13 @@ private struct AdaptiveCoverImage<Placeholder: View>: View {
         .environmentObject(SessionStore())
 }
 
-/// 简单流式标签勾选，避免引入额外依赖。
+/// 按内容宽度换行的食材标签，避免 adaptive 网格把长名称挤成「菠…」。
 private struct FlowIngredientChips: View {
     let names: [String]
     @Binding var selected: Set<String>
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 72), spacing: 8, alignment: .leading)
-    ]
-
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+        ChipFlowLayout(spacing: 8) {
             ForEach(names, id: \.self) { name in
                 let isOn = selected.contains(name)
                 Button {
@@ -1075,7 +1090,7 @@ private struct FlowIngredientChips: View {
                         selected.insert(name)
                     }
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 5) {
                         Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                             .font(.caption)
                         Text(name)
@@ -1083,7 +1098,7 @@ private struct FlowIngredientChips: View {
                             .lineLimit(1)
                     }
                     .foregroundStyle(isOn ? .white : .primary)
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(
                         isOn ? AnyShapeStyle(AppTheme.accent) : AnyShapeStyle(Color(.tertiarySystemFill)),
@@ -1091,7 +1106,60 @@ private struct FlowIngredientChips: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .fixedSize(horizontal: true, vertical: false)
             }
+        }
+    }
+}
+
+private struct ChipFlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var currentX: CGFloat = 0
+        var currentY: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var totalWidth: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if currentX + size.width > maxWidth, currentX > 0 {
+                currentX = 0
+                currentY += rowHeight + spacing
+                rowHeight = 0
+            }
+            currentX += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+            totalWidth = max(totalWidth, currentX - spacing)
+            totalHeight = currentY + rowHeight
+        }
+
+        return CGSize(
+            width: maxWidth.isFinite ? maxWidth : totalWidth,
+            height: totalHeight
+        )
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var currentX = bounds.minX
+        var currentY = bounds.minY
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if currentX + size.width > bounds.maxX, currentX > bounds.minX {
+                currentX = bounds.minX
+                currentY += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(
+                at: CGPoint(x: currentX, y: currentY),
+                proposal: ProposedViewSize(size)
+            )
+            currentX += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
         }
     }
 }

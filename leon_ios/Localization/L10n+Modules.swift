@@ -213,6 +213,13 @@ extension L10n {
         static func filterStockSelectedCount(_ count: Int) -> String {
             L10n.format("recommend.filter.stock_selected_count", count)
         }
+        static func filterStockResultCount(_ count: Int) -> String {
+            L10n.format("recommend.filter.stock_result_count", count)
+        }
+        static let filterStockNoResult = LocalizedStringResource(
+            "recommend.filter.stock_no_result",
+            defaultValue: "这几样暂时没匹配到菜，换几个食材再试试"
+        )
         static let feedLoading = LocalizedStringResource("recommend.feed.loading", defaultValue: "正在准备推荐")
         static let feedEmptyTitle = LocalizedStringResource("recommend.feed.empty_title", defaultValue: "还没有推荐结果")
         static let feedEmptySubtitle = LocalizedStringResource(
