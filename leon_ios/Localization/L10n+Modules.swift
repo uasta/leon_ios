@@ -160,7 +160,7 @@ extension L10n {
             defaultValue: "优先考虑消耗现有食材"
         )
 
-        static let contextTitle = LocalizedStringResource("recommend.context.title", defaultValue: "当前食材上下文")
+        static let contextTitle = LocalizedStringResource("recommend.context.title", defaultValue: "正在用这些食材")
 
         static func contextBroughtIn(_ count: Int, _ names: String) -> String {
             L10n.format("recommend.context.brought_in", count, names)
@@ -169,15 +169,16 @@ extension L10n {
         static let heroTitle = LocalizedStringResource("recommend.hero.title", defaultValue: "今天吃点什么")
         static let heroSubtitleDefault = LocalizedStringResource(
             "recommend.hero.subtitle_default",
-            defaultValue: "按你当前的收藏偏好、家常灵感和热门菜谱，整理成更适合快速浏览的发现流。"
+            defaultValue: "先刷几道轻松上手的菜，饿了直接点开做。"
         )
         static let heroSubtitleWithIngredients = LocalizedStringResource(
             "recommend.hero.subtitle_with_ingredients",
-            defaultValue: "已经把你勾选的食材带进来了，先从更接近可开做的方向帮你铺开。"
+            defaultValue: "按你勾选的食材，挑几道能赶紧开做的。"
         )
         static func heroSubtitleFlavors(_ flavors: String) -> String {
             L10n.format("recommend.hero.subtitle_flavors", flavors)
         }
+        static let heroRefresh = LocalizedStringResource("recommend.hero.refresh", defaultValue: "换一批")
         static let dailyBadge = LocalizedStringResource("recommend.daily.badge", defaultValue: "今日推荐")
         static let heroMetricToday = LocalizedStringResource("recommend.hero.metric_today", defaultValue: "今日推荐")
         static let heroMetricHot = LocalizedStringResource("recommend.hero.metric_hot", defaultValue: "热门词")
@@ -193,6 +194,25 @@ extension L10n {
             "recommend.filter.stock_empty",
             defaultValue: "先在食材页添加食材，再来清库存"
         )
+        static let filterStockHint = LocalizedStringResource(
+            "recommend.filter.stock_hint",
+            defaultValue: "勾选想用掉的食材，不必一次全用"
+        )
+        static let filterStockApply = LocalizedStringResource(
+            "recommend.filter.stock_apply",
+            defaultValue: "开始推荐"
+        )
+        static let filterStockCancel = LocalizedStringResource(
+            "recommend.filter.stock_cancel",
+            defaultValue: "取消"
+        )
+        static let filterStockActiveHint = LocalizedStringResource(
+            "recommend.filter.stock_active_hint",
+            defaultValue: "下面是按勾选食材筛出来的菜"
+        )
+        static func filterStockSelectedCount(_ count: Int) -> String {
+            L10n.format("recommend.filter.stock_selected_count", count)
+        }
         static let feedLoading = LocalizedStringResource("recommend.feed.loading", defaultValue: "正在准备推荐")
         static let feedEmptyTitle = LocalizedStringResource("recommend.feed.empty_title", defaultValue: "还没有推荐结果")
         static let feedEmptySubtitle = LocalizedStringResource(

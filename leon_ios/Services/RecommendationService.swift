@@ -22,15 +22,43 @@ actor RecommendationService {
 
     struct DailyRecommendationResponse: Decodable {
         let date: String
+        let batch: Int?
+        let items: [RecipeSummary]
         let featured: RecipeSummary?
         let alternatives: [RecipeSummary]
         let preferredFlavors: [String]
 
         enum CodingKeys: String, CodingKey {
             case date
+            case batch
+            case items
             case featured
             case alternatives
             case preferredFlavors = "preferred_flavors"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            date = try container.decode(String.self, forKey: .date)
+            batch = try container.decodeIfPresent(Int.self, forKey: .batch)
+            preferredFlavors = (try? container.decode([String].self, forKey: .preferredFlavors)) ?? []
+            featured = try container.decodeIfPresent(RecipeSummary.self, forKey: .featured)
+            alternatives = (try? container.decode([RecipeSummary].self, forKey: .alternatives)) ?? []
+
+            if let decodedItems = try? container.decode([RecipeSummary].self, forKey: .items), !decodedItems.isEmpty {
+                items = decodedItems
+            } else if let featured {
+                items = [featured] + alternatives
+            } else {
+                items = alternatives
+            }
+        }
+
+        /// 统一给 UI 用的今日推荐列表。
+        var displayItems: [RecipeSummary] {
+            if !items.isEmpty { return items }
+            if let featured { return [featured] + alternatives }
+            return alternatives
         }
     }
 
@@ -39,19 +67,22 @@ actor RecommendationService {
         let page: Int
         let limit: Int
         let hasMore: Bool
+        let seed: Int
 
         enum CodingKeys: String, CodingKey {
             case items
             case page
             case limit
             case hasMore = "has_more"
+            case seed
         }
 
-        init(items: [RecipeSummary], page: Int, limit: Int, hasMore: Bool) {
+        init(items: [RecipeSummary], page: Int, limit: Int, hasMore: Bool, seed: Int = 0) {
             self.items = items
             self.page = page
             self.limit = limit
             self.hasMore = hasMore
+            self.seed = seed
         }
 
         init(from decoder: Decoder) throws {
@@ -61,6 +92,7 @@ actor RecommendationService {
                 self.page = (try? keyed.decode(Int.self, forKey: .page)) ?? 1
                 self.limit = (try? keyed.decode(Int.self, forKey: .limit)) ?? items.count
                 self.hasMore = (try? keyed.decode(Bool.self, forKey: .hasMore)) ?? false
+                self.seed = (try? keyed.decode(Int.self, forKey: .seed)) ?? 0
                 return
             }
 
@@ -69,6 +101,7 @@ actor RecommendationService {
             self.page = 1
             self.limit = legacyItems.count
             self.hasMore = false
+            self.seed = 0
         }
     }
 
@@ -78,13 +111,14 @@ actor RecommendationService {
         self.client = client
     }
 
-    func fetchRecommendationFeed(page: Int = 1, limit: Int = 20) async throws -> APIEnvelope<RecommendationFeedPage> {
+    func fetchRecommendationFeed(page: Int = 1, limit: Int = 20, seed: Int = 0) async throws -> APIEnvelope<RecommendationFeedPage> {
         try await client.send(
             APIRequest(
                 path: "api/v1/recommendations/feed",
                 queryItems: [
                     URLQueryItem(name: "page", value: String(page)),
                     URLQueryItem(name: "limit", value: String(limit)),
+                    URLQueryItem(name: "seed", value: String(max(0, seed))),
                 ]
             ),
             as: RecommendationFeedPage.self
@@ -134,10 +168,12 @@ actor RecommendationService {
     func fetchDailyRecommendation(
         date: String? = nil,
         ingredients: [String] = [],
-        limit: Int = 5
+        limit: Int = 6,
+        batch: Int = 0
     ) async throws -> APIEnvelope<DailyRecommendationResponse> {
         var queryItems = [
             URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "batch", value: String(max(0, batch))),
         ]
         if let date, !date.isEmpty {
             queryItems.append(URLQueryItem(name: "date", value: date))

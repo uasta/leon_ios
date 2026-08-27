@@ -4256,13 +4256,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ingredient context"
+            "value" : "Using these ingredients"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "当前食材上下文"
+            "value" : "正在用这些食材"
           }
         }
       }
@@ -4799,13 +4799,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "A discovery feed shaped by your favorites, homestyle ideas, and popular dishes."
+            "value" : "A few easy dishes to browse — tap one when you're hungry."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "按你当前的收藏偏好、家常灵感和热门菜谱，整理成更适合快速浏览的发现流。"
+            "value" : "先刷几道轻松上手的菜，饿了直接点开做。"
           }
         }
       }
@@ -4816,13 +4816,30 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Today leans toward your flavors: %@"
+            "value" : "Today leans toward: %@"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "今日更偏向你的口味：%@"
+            "value" : "今天更想吃：%@"
+          }
+        }
+      }
+    },
+    "recommend.hero.refresh" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shuffle"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "换一批"
           }
         }
       }
@@ -4878,19 +4895,104 @@
         }
       }
     },
+    "recommend.filter.stock_hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick what to use — no need to clear everything at once."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "勾选想用掉的食材，不必一次全用"
+          }
+        }
+      }
+    },
+    "recommend.filter.stock_apply" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Find recipes"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始推荐"
+          }
+        }
+      }
+    },
+    "recommend.filter.stock_cancel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消"
+          }
+        }
+      }
+    },
+    "recommend.filter.stock_active_hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recipes matched to your selected ingredients"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下面是按勾选食材筛出来的菜"
+          }
+        }
+      }
+    },
+    "recommend.filter.stock_selected_count" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d selected"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已选 %d 样"
+          }
+        }
+      }
+    },
     "recommend.hero.subtitle_with_ingredients" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Your selected ingredients are in. Let's start from dishes you can cook soon."
+            "value" : "Picked for the ingredients you checked — ready to cook."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已经把你勾选的食材带进来了，先从更接近可开做的方向帮你铺开。"
+            "value" : "按你勾选的食材，挑几道能赶紧开做的。"
           }
         }
       }

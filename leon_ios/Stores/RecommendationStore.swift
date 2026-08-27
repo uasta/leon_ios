@@ -18,13 +18,16 @@ final class RecommendationStore: ObservableObject {
     @Published private(set) var searchHistory: [String]
     @Published private(set) var hotSearches: [String]
     @Published private(set) var selectedIngredientNames: [String]
+    @Published private(set) var dailyItems: [RecipeSummary]
     @Published private(set) var dailyFeatured: RecipeSummary?
     @Published private(set) var dailyAlternatives: [RecipeSummary]
+    @Published private(set) var dailyBatch: Int
     @Published private(set) var preferredFlavors: [String]
     @Published private(set) var isLoadingDaily: Bool
     @Published private(set) var isLoading: Bool
     @Published private(set) var isLoadingMore: Bool
     @Published private(set) var hasMoreFeed: Bool
+    @Published private(set) var feedSeed: Int
     @Published private(set) var isSearching: Bool
     @Published private(set) var isFetchingSuggestions: Bool
     @Published private(set) var errorMessage: String?
@@ -61,13 +64,16 @@ final class RecommendationStore: ObservableObject {
         self.searchHistory = Self.loadSearchHistory()
         self.hotSearches = hotSearches
         self.selectedIngredientNames = Self.normalizedNames(from: selectedIngredientNames)
+        self.dailyItems = []
         self.dailyFeatured = nil
         self.dailyAlternatives = []
+        self.dailyBatch = 0
         self.preferredFlavors = []
         self.isLoadingDaily = false
         self.isLoading = isLoading
         self.isLoadingMore = false
         self.hasMoreFeed = false
+        self.feedSeed = 0
         self.isSearching = isSearching
         self.isFetchingSuggestions = false
         self.errorMessage = errorMessage
@@ -99,10 +105,13 @@ final class RecommendationStore: ObservableObject {
         isLoadingMore = true
 
         do {
-            let response = try await service.fetchRecommendationFeed(page: feedPage + 1)
+            let response = try await service.fetchRecommendationFeed(page: feedPage + 1, seed: feedSeed)
             feedPage = response.data.page
             hasMoreFeed = response.data.hasMore
-            rawFeed.append(contentsOf: response.data.items)
+            let incoming = response.data.items.filter { incoming in
+                !rawFeed.contains(where: { $0.id == incoming.id })
+            }
+            rawFeed.append(contentsOf: incoming)
             feed = applyInteractionState(to: rawFeed)
         } catch {
             if errorMessage == nil {
@@ -123,37 +132,67 @@ final class RecommendationStore: ObservableObject {
         await refreshDaily(ingredientNames: ingredientNames)
     }
 
-    func refreshDaily(ingredientNames: [String] = []) async {
+    func refreshDaily(ingredientNames: [String] = [], batch: Int? = nil, rotate: Bool = false) async {
         isLoadingDaily = true
+        let previousIDs = Set(dailyItems.map(\.id))
+        let nextBatch: Int = {
+            if let batch { return max(0, batch) }
+            if rotate { return dailyBatch + 1 }
+            return dailyBatch
+        }()
 
         do {
             let response = try await service.fetchDailyRecommendation(
-                ingredients: Self.normalizedNames(from: ingredientNames)
+                ingredients: Self.normalizedNames(from: ingredientNames),
+                limit: 6,
+                batch: nextBatch
             )
-            dailyFeatured = response.data.featured.map(applyInteractionState(to:))
-            dailyAlternatives = applyInteractionState(to: response.data.alternatives)
+            var items = applyInteractionState(to: response.data.displayItems)
+
+            // 服务端若尚未部署 batch，本地再切一批，保证「换一批」肉眼可见。
+            if rotate, !items.isEmpty, Set(items.map(\.id)) == previousIDs, !feed.isEmpty {
+                let start = (nextBatch * 3) % max(feed.count, 1)
+                let rotated = Array(feed[start...]) + Array(feed[..<start])
+                items = Array(rotated.prefix(6))
+            }
+
+            dailyItems = items
+            dailyFeatured = items.first
+            dailyAlternatives = Array(items.dropFirst())
+            dailyBatch = response.data.batch ?? nextBatch
             preferredFlavors = response.data.preferredFlavors
             hasLoadedDaily = true
         } catch {
-            if dailyFeatured == nil {
-                dailyFeatured = feed.first
-                dailyAlternatives = Array(feed.dropFirst().prefix(4))
+            // 网络失败时也尽量本地换一批，避免按钮点了没反应。
+            if rotate, !feed.isEmpty {
+                let start = (nextBatch * 3) % max(feed.count, 1)
+                let rotated = Array(feed[start...]) + Array(feed[..<start])
+                let items = Array(rotated.prefix(6))
+                dailyItems = items
+                dailyFeatured = items.first
+                dailyAlternatives = Array(items.dropFirst())
+                dailyBatch = nextBatch
+            } else if dailyItems.isEmpty {
+                let fallback = Array(feed.prefix(6))
+                dailyItems = fallback
+                dailyFeatured = fallback.first
+                dailyAlternatives = Array(fallback.dropFirst())
             }
         }
 
         isLoadingDaily = false
     }
 
-    func refreshForCurrentContext() async {
+    func refreshForCurrentContext(rotateFeed: Bool = false) async {
         if selectedIngredientNames.isEmpty {
-            await refreshDefaultFeed()
+            await refreshDefaultFeed(rotate: rotateFeed)
         } else {
             await refreshFeedByIngredients()
         }
     }
 
     func retry() async {
-        await refreshForCurrentContext()
+        await refreshForCurrentContext(rotateFeed: true)
     }
 
     func retrySearch() async {
@@ -270,21 +309,41 @@ final class RecommendationStore: ObservableObject {
         isSearching = false
     }
 
-    private func refreshDefaultFeed() async {
+    private func refreshDefaultFeed(rotate: Bool = false) async {
         isLoading = true
         errorMessage = nil
         feedPage = 0
         hasMoreFeed = false
 
+        let nextSeed = rotate ? feedSeed + 1 : feedSeed
+
         do {
-            let response = try await service.fetchRecommendationFeed(page: 1)
-            feedPage = response.data.page
+            var response = try await service.fetchRecommendationFeed(page: 1, seed: nextSeed)
+            var items = response.data.items
+
+            // 旧服务端忽略 seed 时会返回同一页；再按 seed 跳页，保证下拉能看到新菜。
+            if rotate,
+               !items.isEmpty,
+               items.map(\.id) == rawFeed.prefix(items.count).map(\.id) {
+                let jumpPage = (nextSeed % 400) + 1
+                response = try await service.fetchRecommendationFeed(page: jumpPage, seed: 0)
+                items = response.data.items
+            }
+
+            feedPage = max(1, response.data.page)
             hasMoreFeed = response.data.hasMore
-            rawFeed = response.data.items
+            feedSeed = nextSeed
+            rawFeed = items
             feed = applyInteractionState(to: rawFeed)
             hasLoadedFeed = true
         } catch {
             errorMessage = error.localizedDescription
+            if rotate, !rawFeed.isEmpty {
+                let shift = min(rawFeed.count, max(3, rawFeed.count / 2))
+                rawFeed = Array(rawFeed.dropFirst(shift)) + Array(rawFeed.prefix(shift))
+                feed = applyInteractionState(to: rawFeed)
+                feedSeed = nextSeed
+            }
         }
 
         isLoading = false
@@ -377,10 +436,9 @@ final class RecommendationStore: ObservableObject {
     private func refreshDisplayedRecipes() {
         feed = applyInteractionState(to: rawFeed)
         searchResults = applyInteractionState(to: rawSearchResults)
-        if let dailyFeatured {
-            self.dailyFeatured = applyInteractionState(to: dailyFeatured)
-        }
-        dailyAlternatives = applyInteractionState(to: dailyAlternatives)
+        dailyItems = applyInteractionState(to: dailyItems)
+        dailyFeatured = dailyItems.first
+        dailyAlternatives = Array(dailyItems.dropFirst())
     }
 
     private func mergedSuggestionList(remote: [String], query: String) -> [String] {

@@ -7,11 +7,15 @@ struct RecommendHomeView: View {
 
     @State private var isSearchPresented: Bool = false
     @State private var isStockFilterEnabled: Bool = false
+    @State private var isStockPickerExpanded: Bool = false
+    @State private var draftStockNames: Set<String> = []
     @State private var stockFilterMessage: String?
 
     private let hotSearchColumns = [
         GridItem(.adaptive(minimum: 92), spacing: 10, alignment: .leading)
     ]
+    private let dailyStripWidth: CGFloat = 268
+    private let dailyStripHeight: CGFloat = 96
 
     private var trimmedQuery: String {
         store.query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -33,14 +37,20 @@ struct RecommendHomeView: View {
         }
     }
 
+    private var dailyDisplayItems: [RecipeSummary] {
+        if !store.dailyItems.isEmpty {
+            return store.dailyItems
+        }
+        if let featured = store.dailyFeatured {
+            return [featured] + store.dailyAlternatives
+        }
+        return store.dailyAlternatives
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    if !store.selectedIngredientNames.isEmpty {
-                        contextSection
-                    }
-
                     if isShowingSearchMode {
                         searchSection
                     } else {
@@ -76,8 +86,14 @@ struct RecommendHomeView: View {
             .onChange(of: store.feed.map(\.id)) { _, _ in
                 prefetchCoverImages(for: store.feed)
             }
+            .onChange(of: store.dailyItems.map(\.id)) { _, _ in
+                prefetchCoverImages(for: store.dailyItems)
+            }
             .onChange(of: store.selectedIngredientNames) { _, names in
                 isStockFilterEnabled = !names.isEmpty
+                if names.isEmpty {
+                    isStockPickerExpanded = false
+                }
             }
             .refreshable {
                 if isShowingSearchMode {
@@ -88,29 +104,9 @@ struct RecommendHomeView: View {
                     }
                 } else {
                     await store.retry()
-                    await store.refreshDaily(ingredientNames: activeIngredientNames)
+                    await store.refreshDaily(ingredientNames: activeIngredientNames, rotate: true)
                 }
             }
-        }
-    }
-
-    private var contextSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionHeader(L10n.text(L10n.Recommend.contextTitle), actionTitle: L10n.text(L10n.Action.clear)) {
-                isStockFilterEnabled = false
-                stockFilterMessage = nil
-                store.clearSelectedIngredientNames()
-            }
-
-            Text(L10n.Recommend.contextBroughtIn(
-                store.selectedIngredientNames.count,
-                store.selectedIngredientNames.joined(separator: "、")
-            ))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
         }
     }
 
@@ -128,45 +124,46 @@ struct RecommendHomeView: View {
                 Spacer(minLength: 12)
 
                 Button {
-                    isSearchPresented = true
+                    Task {
+                        await store.refreshDaily(ingredientNames: activeIngredientNames, rotate: true)
+                    }
                 } label: {
-                    Image(systemName: "magnifyingglass")
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                        .frame(width: 42, height: 42)
-                        .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 14))
+                    Group {
+                        if store.isLoadingDaily {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                    .frame(width: 42, height: 42)
+                    .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 14))
                 }
                 .buttonStyle(.plain)
+                .disabled(store.isLoadingDaily)
+                .accessibilityLabel(L10n.text(L10n.Recommend.heroRefresh))
             }
 
-            if store.isLoadingDaily && store.dailyFeatured == nil {
+            if store.isLoadingDaily && dailyDisplayItems.isEmpty {
                 ProgressView()
-                    .frame(maxWidth: .infinity, minHeight: 120)
-            } else if let featured = store.dailyFeatured {
-                NavigationLink(value: featured) {
-                    dailyFeaturedCard(featured)
-                }
-                .buttonStyle(.plain)
-
-                if !store.dailyAlternatives.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(store.dailyAlternatives) { recipe in
-                                NavigationLink(value: recipe) {
-                                    Text(recipe.title)
-                                        .font(.subheadline.weight(.medium))
-                                        .foregroundStyle(Color(red: 0.34, green: 0.21, blue: 0.09))
-                                        .lineLimit(1)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 9)
-                                        .background(Color.white.opacity(0.78), in: Capsule())
-                                }
-                                .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: dailyStripHeight)
+            } else if !dailyDisplayItems.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(dailyDisplayItems) { recipe in
+                            NavigationLink(value: recipe) {
+                                dailyStripCard(recipe)
                             }
+                            .buttonStyle(.plain)
                         }
-                        .padding(.horizontal, 2)
                     }
+                    .padding(.horizontal, 2)
                 }
+                // 固定高度，避免横向 ScrollView 在 LazyVStack 里高度塌缩导致与下方列表重叠。
+                .frame(height: dailyStripHeight)
+                .id("daily-\(store.dailyBatch)-\(dailyDisplayItems.map { String($0.id) }.joined(separator: "-"))")
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
@@ -194,6 +191,7 @@ struct RecommendHomeView: View {
                     }
                     .padding(.horizontal, 2)
                 }
+                .frame(height: 40)
             }
         }
         .padding(18)
@@ -210,7 +208,7 @@ struct RecommendHomeView: View {
         return L10n.text(L10n.Recommend.heroSubtitleDefault)
     }
 
-    private func dailyFeaturedCard(_ recipe: RecipeSummary) -> some View {
+    private func dailyStripCard(_ recipe: RecipeSummary) -> some View {
         HStack(spacing: 12) {
             Group {
                 if let coverURL = recipe.coverURL,
@@ -229,16 +227,12 @@ struct RecommendHomeView: View {
                     Color.white.opacity(0.55)
                 }
             }
-            .frame(width: 88, height: 88)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .frame(width: 72, height: 72)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(L10n.text(L10n.Recommend.dailyBadge))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color(red: 0.75, green: 0.36, blue: 0.18))
-
                 Text(recipe.title)
-                    .font(.headline.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(2)
 
@@ -249,13 +243,10 @@ struct RecommendHomeView: View {
             }
 
             Spacer(minLength: 0)
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
         }
         .padding(12)
-        .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .frame(width: dailyStripWidth, height: dailyStripHeight, alignment: .leading)
+        .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var recommendationSection: some View {
@@ -269,6 +260,14 @@ struct RecommendHomeView: View {
                 Spacer(minLength: 0)
 
                 stockFilterButton
+            }
+
+            if isStockPickerExpanded {
+                stockPickerPanel
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            } else if isStockFilterEnabled, !store.selectedIngredientNames.isEmpty {
+                stockActiveSummary
+                    .transition(.opacity)
             }
 
             if let stockFilterMessage {
@@ -295,6 +294,7 @@ struct RecommendHomeView: View {
                 )
             } else {
                 waterfallGrid(store.feed)
+                    .id("feed-seed-\(store.feedSeed)-\(store.feed.prefix(8).map(\.id))")
 
                 if store.isLoadingMore {
                     ProgressView()
@@ -303,6 +303,76 @@ struct RecommendHomeView: View {
                 }
             }
         }
+        .animation(.easeInOut(duration: 0.22), value: isStockPickerExpanded)
+        .animation(.easeInOut(duration: 0.22), value: isStockFilterEnabled)
+    }
+
+    private var stockActiveSummary: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L10n.text(L10n.Recommend.filterStockActiveHint))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(store.selectedIngredientNames.joined(separator: "、"))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 8)
+
+            Button(L10n.text(L10n.Action.clear)) {
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    isStockFilterEnabled = false
+                    isStockPickerExpanded = false
+                    draftStockNames = []
+                    stockFilterMessage = nil
+                }
+                store.clearSelectedIngredientNames()
+            }
+            .font(.caption)
+        }
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var stockPickerPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.text(L10n.Recommend.filterStockHint))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            FlowIngredientChips(
+                names: Array(activeIngredientNames.prefix(20)),
+                selected: $draftStockNames
+            )
+
+            HStack(spacing: 10) {
+                Text(L10n.Recommend.filterStockSelectedCount(draftStockNames.count))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 0)
+
+                Button(L10n.text(L10n.Recommend.filterStockCancel)) {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        isStockPickerExpanded = false
+                        draftStockNames = Set(store.selectedIngredientNames)
+                        stockFilterMessage = nil
+                    }
+                }
+                .font(.subheadline)
+
+                Button(L10n.text(L10n.Recommend.filterStockApply)) {
+                    applyStockFilter()
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(draftStockNames.isEmpty ? .secondary : AppTheme.accent)
+                .disabled(draftStockNames.isEmpty)
+            }
+        }
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 
     private var stockFilterButton: some View {
@@ -310,15 +380,15 @@ struct RecommendHomeView: View {
             toggleStockFilter()
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: isStockFilterEnabled ? "refrigerator.fill" : "refrigerator")
+                Image(systemName: isStockFilterEnabled || isStockPickerExpanded ? "refrigerator.fill" : "refrigerator")
                 Text(L10n.text(L10n.Recommend.filterStock))
                     .font(.subheadline.weight(.semibold))
             }
-            .foregroundStyle(isStockFilterEnabled ? .white : .primary)
+            .foregroundStyle(isStockFilterEnabled || isStockPickerExpanded ? .white : .primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(
-                isStockFilterEnabled
+                isStockFilterEnabled || isStockPickerExpanded
                     ? AnyShapeStyle(AppTheme.accent)
                     : AnyShapeStyle(Color(.secondarySystemBackground)),
                 in: Capsule()
@@ -328,10 +398,21 @@ struct RecommendHomeView: View {
     }
 
     private func toggleStockFilter() {
+        if isStockPickerExpanded {
+            withAnimation(.easeInOut(duration: 0.22)) {
+                isStockPickerExpanded = false
+                draftStockNames = Set(store.selectedIngredientNames)
+                stockFilterMessage = nil
+            }
+            return
+        }
+
         if isStockFilterEnabled {
-            isStockFilterEnabled = false
-            stockFilterMessage = nil
-            store.clearSelectedIngredientNames()
+            withAnimation(.easeInOut(duration: 0.22)) {
+                draftStockNames = Set(store.selectedIngredientNames)
+                isStockPickerExpanded = true
+                stockFilterMessage = nil
+            }
             return
         }
 
@@ -341,8 +422,25 @@ struct RecommendHomeView: View {
             return
         }
 
-        isStockFilterEnabled = true
-        stockFilterMessage = nil
+        withAnimation(.easeInOut(duration: 0.22)) {
+            draftStockNames = Set(names)
+            isStockPickerExpanded = true
+            stockFilterMessage = nil
+        }
+    }
+
+    private func applyStockFilter() {
+        let names = Array(draftStockNames).sorted()
+        guard !names.isEmpty else {
+            stockFilterMessage = L10n.text(L10n.Recommend.filterStockEmpty)
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.22)) {
+            isStockPickerExpanded = false
+            isStockFilterEnabled = true
+            stockFilterMessage = nil
+        }
         store.setSelectedIngredientNames(names)
     }
 
@@ -955,4 +1053,45 @@ private struct AdaptiveCoverImage<Placeholder: View>: View {
         .environmentObject(RecommendationStore(feed: RecommendationStore.sampleFeed))
         .environmentObject(IngredientStore())
         .environmentObject(SessionStore())
+}
+
+/// 简单流式标签勾选，避免引入额外依赖。
+private struct FlowIngredientChips: View {
+    let names: [String]
+    @Binding var selected: Set<String>
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 72), spacing: 8, alignment: .leading)
+    ]
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+            ForEach(names, id: \.self) { name in
+                let isOn = selected.contains(name)
+                Button {
+                    if isOn {
+                        selected.remove(name)
+                    } else {
+                        selected.insert(name)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                            .font(.caption)
+                        Text(name)
+                            .font(.subheadline)
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(isOn ? .white : .primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(
+                        isOn ? AnyShapeStyle(AppTheme.accent) : AnyShapeStyle(Color(.tertiarySystemFill)),
+                        in: Capsule()
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
 }
